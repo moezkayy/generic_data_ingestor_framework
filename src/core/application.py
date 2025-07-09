@@ -2,7 +2,6 @@ from pathlib import Path
 from typing import List, Dict, Any
 import time
 
-# Use simple absolute imports (no dots)
 from handlers.logging_handler import LoggingHandler
 from handlers.error_handler import ErrorHandler
 from handlers.file_handler import FileHandler
@@ -11,15 +10,11 @@ from processors.schema_processor import SchemaProcessor
 from processors.json_processor import JSONProcessor
 from utils.report_generator import ReportGenerator
 
-# ... rest of your application.py code stays the same
+
 
 class DataIngestionApplication:
-    """
-    Main application class that orchestrates the data ingestion process
-    """
 
     def __init__(self):
-        """Initialize the application with necessary handlers and processors"""
         self.logging_handler = LoggingHandler()
         self.error_handler = ErrorHandler()
         self.file_handler = FileHandler()
@@ -34,22 +29,7 @@ class DataIngestionApplication:
             dry_run: bool = False, file_types: List[str] = None,
             recursive: bool = True, validate_schemas: bool = True,
             generate_flat_versions: bool = True) -> int:
-        """
-        Run the complete data ingestion process
 
-        Args:
-            directory (str): Source directory to scan
-            output_dir (str): Output directory for results
-            log_level (str): Logging level
-            dry_run (bool): If True, only show what would be processed
-            file_types (List[str]): File types to process
-            recursive (bool): Whether to scan recursively
-            validate_schemas (bool): Whether to validate schemas
-            generate_flat_versions (bool): Whether to generate flattened data
-
-        Returns:
-            int: Exit code (0 for success, 1 for error)
-        """
         start_time = time.time()
 
         try:
@@ -119,13 +99,11 @@ class DataIngestionApplication:
                 self.logging_handler.close_logging()
 
     def _initialize_processors(self):
-        """Initialize all processors"""
         self.schema_processor = SchemaProcessor()
         self.json_processor = JSONProcessor()
         self.logger.debug("🔧 Processors initialized")
 
     def _validate_inputs(self, directory: str, output_dir: str, file_types: List[str]):
-        """Validate input parameters"""
         # Validate source directory
         if not self.file_handler.directory_exists(directory):
             raise FileNotFoundError(f"Source directory does not exist: {directory}")
@@ -140,7 +118,6 @@ class DataIngestionApplication:
         self.logger.debug("✅ Input validation completed")
 
     def _display_discovery_results(self, discovered_files: Dict[str, List[Path]]):
-        """Display file discovery results with emojis for better UX"""
         total_files = sum(len(files) for files in discovered_files.values())
         self.logger.info(f"📋 Found {total_files} files to process:")
 
@@ -161,7 +138,6 @@ class DataIngestionApplication:
     def _process_files(self, discovered_files: Dict[str, List[Path]],
                        output_path: Path, validate_schemas: bool = True,
                        generate_flat_versions: bool = True) -> Dict[str, Any]:
-        """Process all discovered files"""
         results = {}
 
         # Process JSON files
@@ -186,7 +162,6 @@ class DataIngestionApplication:
         return results
 
     def _generate_reports(self, processing_results: Dict[str, Any], output_path: Path):
-        """Generate comprehensive reports"""
         self.logger.info("📊 Generating reports...")
 
         try:
@@ -208,7 +183,6 @@ class DataIngestionApplication:
             self.logger.error(f"❌ Error generating reports: {e}")
 
     def _log_final_statistics(self, processing_results: Dict[str, Any], total_time: float):
-        """Log final processing statistics"""
         total_files = 0
         successful_files = 0
         total_records = 0
