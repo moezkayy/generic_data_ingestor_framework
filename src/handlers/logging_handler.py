@@ -7,9 +7,6 @@ import json
 
 
 class LoggingHandler:
-    """
-    Comprehensive logging handler with multiple output formats and levels
-    """
 
     def __init__(self):
         """Initialize the logging handler"""
@@ -22,18 +19,7 @@ class LoggingHandler:
                       log_file: Optional[str] = None,
                       console_output: bool = True,
                       file_output: bool = True) -> logging.Logger:
-        """
-        Setup comprehensive logging configuration
 
-        Args:
-            level (str): Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-            log_file (str, optional): Custom log file path
-            console_output (bool): Enable console output
-            file_output (bool): Enable file output
-
-        Returns:
-            logging.Logger: Configured logger instance
-        """
         # Create logs directory
         self.log_dir.mkdir(exist_ok=True)
 
@@ -92,31 +78,14 @@ class LoggingHandler:
         return self.logger
 
     def get_logger(self, name: str) -> logging.Logger:
-        """
-        Get a named logger instance
 
-        Args:
-            name (str): Logger name
-
-        Returns:
-            logging.Logger: Logger instance
-        """
         return logging.getLogger(f'data_ingestion.{name}')
 
     def log_performance_metric(self, operation: str, duration: float,
                                record_count: Optional[int] = None,
                                file_size: Optional[int] = None,
                                additional_metrics: Optional[Dict] = None):
-        """
-        Log performance metrics with detailed information
 
-        Args:
-            operation (str): Operation name
-            duration (float): Duration in seconds
-            record_count (int, optional): Number of records processed
-            file_size (int, optional): File size in bytes
-            additional_metrics (Dict, optional): Additional metrics
-        """
         performance_data = {
             'timestamp': datetime.now().isoformat(),
             'operation': operation,
@@ -153,16 +122,7 @@ class LoggingHandler:
     def log_file_operation(self, operation: str, file_path: Path,
                            success: bool, details: Optional[str] = None,
                            file_size: Optional[int] = None):
-        """
-        Log file operation results with structured information
 
-        Args:
-            operation (str): Operation type (e.g., 'READ', 'WRITE', 'PROCESS')
-            file_path (Path): File path
-            success (bool): Whether operation succeeded
-            details (str, optional): Additional details
-            file_size (int, optional): File size in bytes
-        """
         if self.logger:
             status = "SUCCESS" if success else "FAILED"
             msg = f"FILE {operation} - {status}: {file_path.name}"
@@ -181,14 +141,7 @@ class LoggingHandler:
 
     def log_schema_operation(self, operation: str, schema_info: Dict[str, Any],
                              success: bool = True):
-        """
-        Log schema-related operations
-
-        Args:
-            operation (str): Schema operation type
-            schema_info (Dict[str, Any]): Schema information
-            success (bool): Whether operation succeeded
-        """
+        
         if self.logger:
             status = "SUCCESS" if success else "FAILED"
 
@@ -203,13 +156,7 @@ class LoggingHandler:
                 self.logger.error(msg)
 
     def log_validation_result(self, file_path: Path, validation_result: Dict[str, Any]):
-        """
-        Log data validation results
-
-        Args:
-            file_path (Path): File that was validated
-            validation_result (Dict[str, Any]): Validation results
-        """
+        
         if self.logger:
             is_valid = validation_result.get('valid', False)
             error_count = len(validation_result.get('errors', []))
@@ -227,12 +174,7 @@ class LoggingHandler:
                     self.logger.warning(f"  ... and {error_count - 3} more errors")
 
     def log_processing_summary(self, summary_data: Dict[str, Any]):
-        """
-        Log processing summary with statistics
-
-        Args:
-            summary_data (Dict[str, Any]): Summary statistics
-        """
+        
         if self.logger:
             self.logger.info("=" * 60)
             self.logger.info("PROCESSING SUMMARY")
@@ -266,15 +208,7 @@ class LoggingHandler:
             self.logger.info("=" * 60)
 
     def export_performance_logs(self, output_file: Optional[Path] = None) -> Path:
-        """
-        Export performance logs to JSON file
-
-        Args:
-            output_file (Path, optional): Output file path
-
-        Returns:
-            Path: Path to exported file
-        """
+        
         if output_file is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_file = self.log_dir / f"performance_metrics_{timestamp}.json"
@@ -294,12 +228,7 @@ class LoggingHandler:
             raise
 
     def get_performance_summary(self) -> Dict[str, Any]:
-        """
-        Get summary of performance metrics
-
-        Returns:
-            Dict[str, Any]: Performance summary
-        """
+        
         if not self.performance_logs:
             return {'total_operations': 0}
 
@@ -324,12 +253,7 @@ class LoggingHandler:
         }
 
     def set_log_level(self, level: str):
-        """
-        Change logging level dynamically
-
-        Args:
-            level (str): New logging level
-        """
+        
         if self.logger:
             numeric_level = getattr(logging, level.upper())
             self.logger.setLevel(numeric_level)
