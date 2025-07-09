@@ -9,9 +9,6 @@ import hashlib
 
 
 class FileHandler:
-    """
-    Comprehensive file handler with advanced operations and error handling
-    """
 
     def __init__(self):
         """Initialize the file handler"""
@@ -19,15 +16,7 @@ class FileHandler:
         self.operation_history = []
 
     def file_exists(self, file_path: Union[str, Path]) -> bool:
-        """
-        Check if a file exists and is accessible
 
-        Args:
-            file_path (Union[str, Path]): Path to check
-
-        Returns:
-            bool: True if file exists and is accessible
-        """
         try:
             path = Path(file_path)
             return path.exists() and path.is_file()
@@ -36,15 +25,7 @@ class FileHandler:
             return False
 
     def directory_exists(self, dir_path: Union[str, Path]) -> bool:
-        """
-        Check if a directory exists and is accessible
 
-        Args:
-            dir_path (Union[str, Path]): Directory path to check
-
-        Returns:
-            bool: True if directory exists and is accessible
-        """
         try:
             path = Path(dir_path)
             return path.exists() and path.is_dir()
@@ -54,17 +35,7 @@ class FileHandler:
 
     def create_directory(self, dir_path: Union[str, Path],
                          parents: bool = True, exist_ok: bool = True) -> bool:
-        """
-        Create a directory with comprehensive error handling
 
-        Args:
-            dir_path (Union[str, Path]): Directory path to create
-            parents (bool): Create parent directories if needed
-            exist_ok (bool): Don't raise error if directory exists
-
-        Returns:
-            bool: True if successful
-        """
         try:
             path = Path(dir_path)
             path.mkdir(parents=parents, exist_ok=exist_ok)
@@ -79,15 +50,6 @@ class FileHandler:
             return False
 
     def get_comprehensive_file_info(self, file_path: Union[str, Path]) -> Dict[str, Any]:
-        """
-        Get comprehensive file information including metadata
-
-        Args:
-            file_path (Union[str, Path]): Path to file
-
-        Returns:
-            Dict[str, Any]: Comprehensive file information
-        """
         path = Path(file_path)
 
         file_info = {
@@ -142,16 +104,7 @@ class FileHandler:
 
     def validate_file_access(self, file_path: Union[str, Path],
                              operation: str = 'read') -> Tuple[bool, str]:
-        """
-        Validate file access with detailed feedback
 
-        Args:
-            file_path (Union[str, Path]): Path to file
-            operation (str): Operation type ('read', 'write', 'execute')
-
-        Returns:
-            Tuple[bool, str]: (is_valid, error_message)
-        """
         path = Path(file_path)
 
         try:
@@ -180,23 +133,7 @@ class FileHandler:
     def read_json_file(self, file_path: Union[str, Path],
                        encoding: str = 'utf-8-sig',
                        fallback_encodings: List[str] = None) -> Any:
-        """
-        Read JSON file with encoding fallback and comprehensive error handling
 
-        Args:
-            file_path (Union[str, Path]): Path to JSON file
-            encoding (str): Primary encoding to try
-            fallback_encodings (List[str], optional): Fallback encodings to try
-
-        Returns:
-            Any: Parsed JSON data
-
-        Raises:
-            FileNotFoundError: If file doesn't exist
-            PermissionError: If file can't be read
-            json.JSONDecodeError: If file isn't valid JSON
-            UnicodeDecodeError: If encoding fails
-        """
         path = Path(file_path)
 
         # Validate file access
@@ -244,19 +181,7 @@ class FileHandler:
     def write_json_file(self, data: Any, file_path: Union[str, Path],
                         indent: int = 2, ensure_ascii: bool = False,
                         backup_existing: bool = True) -> bool:
-        """
-        Write data to JSON file with backup and validation
 
-        Args:
-            data (Any): Data to write
-            file_path (Union[str, Path]): Output file path
-            indent (int): JSON indentation
-            ensure_ascii (bool): Whether to escape non-ASCII characters
-            backup_existing (bool): Create backup if file exists
-
-        Returns:
-            bool: True if successful
-        """
         path = Path(file_path)
 
         try:
@@ -308,18 +233,7 @@ class FileHandler:
     def write_text_file(self, content: str, file_path: Union[str, Path],
                         encoding: str = 'utf-8',
                         backup_existing: bool = True) -> bool:
-        """
-        Write text content to file with backup and validation
 
-        Args:
-            content (str): Text content to write
-            file_path (Union[str, Path]): Output file path
-            encoding (str): Text encoding
-            backup_existing (bool): Create backup if file exists
-
-        Returns:
-            bool: True if successful
-        """
         path = Path(file_path)
 
         try:
@@ -354,17 +268,7 @@ class FileHandler:
     def copy_file(self, source: Union[str, Path],
                   destination: Union[str, Path],
                   preserve_metadata: bool = True) -> bool:
-        """
-        Copy file with metadata preservation and validation
 
-        Args:
-            source (Union[str, Path]): Source file path
-            destination (Union[str, Path]): Destination file path
-            preserve_metadata (bool): Preserve file metadata
-
-        Returns:
-            bool: True if successful
-        """
         try:
             src_path = Path(source)
             dst_path = Path(destination)
@@ -394,16 +298,7 @@ class FileHandler:
 
     def move_file(self, source: Union[str, Path],
                   destination: Union[str, Path]) -> bool:
-        """
-        Move file with validation
 
-        Args:
-            source (Union[str, Path]): Source file path
-            destination (Union[str, Path]): Destination file path
-
-        Returns:
-            bool: True if successful
-        """
         try:
             src_path = Path(source)
             dst_path = Path(destination)
@@ -430,16 +325,7 @@ class FileHandler:
 
     def delete_file(self, file_path: Union[str, Path],
                     create_backup: bool = False) -> bool:
-        """
-        Delete file with optional backup
 
-        Args:
-            file_path (Union[str, Path]): File path to delete
-            create_backup (bool): Create backup before deletion
-
-        Returns:
-            bool: True if successful
-        """
         try:
             path = Path(file_path)
 
@@ -465,15 +351,7 @@ class FileHandler:
             return False
 
     def get_file_size(self, file_path: Union[str, Path]) -> int:
-        """
-        Get file size in bytes
 
-        Args:
-            file_path (Union[str, Path]): Path to file
-
-        Returns:
-            int: File size in bytes, -1 if error
-        """
         try:
             return Path(file_path).stat().st_size
         except Exception as e:
