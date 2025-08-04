@@ -1711,3 +1711,569 @@ class PostgreSQLConnector(DatabaseConnector):
             error_msg = f"Failed to replace data with validation in {table_name}: {str(e)}"
             self.logger.error(error_msg)
             raise PostgreSQLQueryError(error_msg)
+    
+    def get_primary_key_columns(self, table_name: str, schema_name: str = None) -> List[str]:
+        """
+        Get the primary key columns for a PostgreSQL table.
+        
+        Args:
+            table_name: Name of the table
+            schema_name: Schema name (defaults to current schema)
+            
+        Returns:
+            List of primary key column names
+            
+        Raises:
+            PostgreSQLQueryError: If primary key detection fails
+        """
+        try:
+            query = """
+                SELECT a.attname
+                FROM pg_index i
+                JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+                WHERE i.indrelid = %s::regclass AND i.indisprimary
+                ORDER BY array_position(i.indkey, a.attnum)
+            """
+            
+            # Build table identifier
+            if schema_name:
+                table_identifier = f'"{schema_name}"."{table_name}"'
+            else:
+                table_identifier = f'"{table_name}"'
+            
+            result = self.execute_query(query, [table_identifier])
+            primary_keys = [row['attname'] for row in result]
+            
+            self.logger.debug(f"Primary key columns for {table_identifier}: {primary_keys}")
+            return primary_keys
+            
+        except Exception as e:
+            error_msg = f"Failed to get primary key columns for {table_name}: {str(e)}"
+            self.logger.error(error_msg)
+            raise PostgreSQLQueryError(error_msg)
+    
+    def get_unique_constraints(self, table_name: str, schema_name: str = None) -> List[Dict[str, Any]]:
+        """
+        Get unique constraints for a PostgreSQL table.
+        
+        Args:
+            table_name: Name of the table
+            schema_name: Schema name (defaults to current schema)
+            
+        Returns:
+            List of dictionaries containing constraint information
+            
+        Raises:
+            PostgreSQLQueryError: If constraint detection fails
+        """
+        try:
+            query = """
+                SELECT 
+                    con.conname AS constraint_name,
+                    con.contype AS constraint_type,
+                    array_agg(att.attname ORDER BY array_position(con.conkey, att.attnum)) AS columns
+                FROM pg_constraint con
+                JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = ANY(con.conkey)
+                WHERE con.conrelid = %s::regclass 
+                AND con.contype IN ('p', 'u')  -- primary key or unique
+                GROUP BY con.conname, con.contype
+                ORDER BY con.conname
+            """
+            
+            # Build table identifier
+            if schema_name:
+                table_identifier = f'"{schema_name}"."{table_name}"'
+            else:
+                table_identifier = f'"{table_name}"'
+            
+            result = self.execute_query(query, [table_identifier])
+            
+            constraints = []
+            for row in result:
+                constraints.append({
+                    'constraint_name': row['constraint_name'],
+                    'constraint_type': 'primary_key' if row['constraint_type'] == 'p' else 'unique',
+                    'columns': row['columns']
+                })
+            
+            self.logger.debug(f"Unique constraints for {table_identifier}: {constraints}")
+            return constraints
+            
+        except Exception as e:
+            error_msg = f"Failed to get unique constraints for {table_name}: {str(e)}"
+            self.logger.error(error_msg)
+            raise PostgreSQLQueryError(error_msg)
+    
+    def detect_conflict_columns(self, table_name: str, data: List[Dict[str, Any]], 
+                               schema_name: str = None, prefer_primary_key: bool = True) -> List[str]:
+        """
+        Automatically detect appropriate conflict columns for upsert operations.
+        
+        Args:
+            table_name: Name of the table
+            data: Sample data to analyze for common columns
+            schema_name: Schema name (optional)
+            prefer_primary_key: Whether to prefer primary key over other unique constraints
+            
+        Returns:
+            List of column names suitable for conflict resolution
+            
+        Raises:
+            PostgreSQLQueryError: If no suitable conflict columns are found
+        """
+        try:
+            # Get unique constraints
+            constraints = self.get_unique_constraints(table_name, schema_name)
+            
+            if not constraints:
+                raise PostgreSQLQueryError(f"No unique constraints found for table {table_name}")
+            
+            # Get columns present in the data
+            data_columns = set()
+            for row in data:
+                data_columns.update(row.keys())
+            
+            # Find suitable constraints
+            suitable_constraints = []
+            
+            for constraint in constraints:
+                constraint_columns = set(constraint['columns'])
+                
+                # Check if all constraint columns are present in data
+                if constraint_columns.issubset(data_columns):
+                    suitable_constraints.append(constraint)
+            
+            if not suitable_constraints:
+                available_columns = [c['columns'] for c in constraints]
+                raise PostgreSQLQueryError(
+                    f"No suitable conflict columns found. Available constraints: {available_columns}, "
+                    f"Data columns: {list(data_columns)}"
+                )
+            
+            # Prefer primary key if available and requested
+            if prefer_primary_key:
+                for constraint in suitable_constraints:
+                    if constraint['constraint_type'] == 'primary_key':
+                        self.logger.info(f"Using primary key columns for conflict resolution: {constraint['columns']}")
+                        return constraint['columns']
+            
+            # Use the first suitable constraint
+            selected_constraint = suitable_constraints[0]
+            self.logger.info(f"Using {selected_constraint['constraint_type']} columns for conflict resolution: {selected_constraint['columns']}")
+            return selected_constraint['columns']
+            
+        except Exception as e:
+            error_msg = f"Failed to detect conflict columns for {table_name}: {str(e)}"
+            self.logger.error(error_msg)
+            raise PostgreSQLQueryError(error_msg)
+    
+    def upsert_data_optimized(self, table_name: str, data: List[Dict[str, Any]], 
+                             schema_name: str = None, batch_size: int = 1000,
+                             conflict_columns: Optional[List[str]] = None,
+                             update_columns: Optional[List[str]] = None,
+                             auto_detect_conflicts: bool = True) -> Dict[str, Any]:
+        """
+        Optimized upsert operation with automatic conflict detection and performance optimization.
+        
+        Args:
+            table_name: Name of the target table
+            data: List of dictionaries containing the data to upsert
+            schema_name: Schema name (optional)
+            batch_size: Number of rows to process per batch
+            conflict_columns: Specific columns for conflict resolution (auto-detected if None)
+            update_columns: Specific columns to update on conflict (all non-conflict columns if None)
+            auto_detect_conflicts: Whether to automatically detect conflict columns
+            
+        Returns:
+            Dict containing operation results and statistics
+            
+        Raises:
+            PostgreSQLQueryError: If upsert operation fails
+            ValueError: If parameters are invalid
+        """
+        if not data:
+            raise ValueError("Data cannot be empty")
+        
+        if not isinstance(data, list):
+            raise ValueError("Data must be a list of dictionaries")
+        
+        try:
+            import time
+            
+            full_table_name = f'"{schema_name}"."{table_name}"' if schema_name else f'"{table_name}"'
+            
+            # Validate table exists
+            if not self.table_exists(table_name, schema_name):
+                raise PostgreSQLQueryError(f"Table {full_table_name} does not exist")
+            
+            # Auto-detect conflict columns if not provided
+            if conflict_columns is None and auto_detect_conflicts:
+                conflict_columns = self.detect_conflict_columns(table_name, data, schema_name)
+            elif conflict_columns is None:
+                raise ValueError("conflict_columns must be provided when auto_detect_conflicts=False")
+            
+            # Get table schema for validation
+            table_schema = self.get_table_schema(table_name, schema_name)
+            column_info = {col['column_name']: col for col in table_schema}
+            
+            # Validate conflict columns exist
+            for col in conflict_columns:
+                if col not in column_info:
+                    raise ValueError(f"Conflict column '{col}' does not exist in table")
+            
+            # Determine update columns
+            if update_columns is None:
+                # Get all columns from data, excluding conflict columns
+                all_data_columns = set()
+                for row in data:
+                    all_data_columns.update(row.keys())
+                update_columns = [col for col in all_data_columns if col not in conflict_columns]
+            
+            # Validate update columns
+            for col in update_columns:
+                if col not in column_info:
+                    self.logger.warning(f"Update column '{col}' not found in table schema, will be ignored")
+            
+            update_columns = [col for col in update_columns if col in column_info]
+            
+            # Preprocess data
+            processed_data = self._preprocess_data(data, column_info)
+            
+            # Perform optimized upsert
+            start_time = time.time()
+            
+            total_processed = 0
+            total_batches = (len(processed_data) + batch_size - 1) // batch_size
+            
+            self.logger.info(f"Starting optimized upsert for {full_table_name} with {len(processed_data)} rows")
+            self.logger.info(f"Conflict columns: {conflict_columns}")
+            self.logger.info(f"Update columns: {update_columns}")
+            
+            # Process in batches
+            for batch_num in range(total_batches):
+                start_idx = batch_num * batch_size
+                end_idx = min(start_idx + batch_size, len(processed_data))
+                batch_data = processed_data[start_idx:end_idx]
+                
+                rows_processed = self._upsert_batch_optimized(
+                    full_table_name, batch_data, conflict_columns, update_columns, column_info
+                )
+                total_processed += rows_processed
+                
+                self.logger.debug(f"Batch {batch_num + 1}/{total_batches}: processed {rows_processed} rows")
+            
+            end_time = time.time()
+            
+            # Return operation statistics
+            result = {
+                'success': True,
+                'table_name': full_table_name,
+                'operation': 'upsert_optimized',
+                'rows_processed': total_processed,
+                'conflict_columns': conflict_columns,
+                'update_columns': update_columns,
+                'batch_count': total_batches,
+                'batch_size': batch_size,
+                'execution_time_seconds': round(end_time - start_time, 2),
+                'rows_per_second': round(total_processed / (end_time - start_time), 2) if (end_time - start_time) > 0 else 0
+            }
+            
+            self.logger.info(f"Optimized upsert completed successfully: {result}")
+            return result
+            
+        except Exception as e:
+            error_msg = f"Failed to perform optimized upsert on {table_name}: {str(e)}"
+            self.logger.error(error_msg)
+            raise PostgreSQLQueryError(error_msg)
+    
+    def _upsert_batch_optimized(self, table_name: str, batch_data: List[Dict[str, Any]], 
+                               conflict_columns: List[str], update_columns: List[str],
+                               column_info: Dict[str, Dict[str, Any]]) -> int:
+        """
+        Perform optimized upsert operation on a batch of data.
+        
+        Args:
+            table_name: Full table name
+            batch_data: Batch of data to upsert
+            conflict_columns: Columns that define uniqueness
+            update_columns: Columns to update on conflict
+            column_info: Column information from table schema
+            
+        Returns:
+            int: Number of rows processed
+        """
+        if not batch_data:
+            return 0
+        
+        try:
+            # Get all columns from batch
+            all_columns = set()
+            for row in batch_data:
+                all_columns.update(row.keys())
+            
+            # Filter to only include columns that exist in the table
+            columns = sorted([col for col in all_columns if col in column_info])
+            
+            # Build optimized upsert query
+            column_list = ', '.join(f'"{col}"' for col in columns)
+            placeholders = ', '.join(['%s'] * len(columns))
+            conflict_list = ', '.join(f'"{col}"' for col in conflict_columns)
+            
+            # Build UPDATE SET clause for non-conflict columns
+            valid_update_columns = [col for col in update_columns if col in columns]
+            
+            if valid_update_columns:
+                update_set = ', '.join(f'"{col}" = EXCLUDED."{col}"' for col in valid_update_columns)
+                query = f"""
+                    INSERT INTO {table_name} ({column_list}) 
+                    VALUES ({placeholders})
+                    ON CONFLICT ({conflict_list}) 
+                    DO UPDATE SET {update_set}
+                """
+            else:
+                # No columns to update, just ignore conflicts
+                query = f"""
+                    INSERT INTO {table_name} ({column_list}) 
+                    VALUES ({placeholders})
+                    ON CONFLICT ({conflict_list}) 
+                    DO NOTHING
+                """
+            
+            # Prepare batch parameters
+            batch_params = []
+            for row in batch_data:
+                row_params = [row.get(col) for col in columns]
+                batch_params.append(row_params)
+            
+            # Execute optimized upsert
+            with self._get_connection() as connection:
+                with connection.cursor() as cursor:
+                    psycopg2.extras.execute_batch(
+                        cursor, query, batch_params, 
+                        page_size=min(len(batch_params), 1000)  # Optimize page size
+                    )
+                    rows_affected = cursor.rowcount
+                    connection.commit()
+                    
+                    return rows_affected
+                    
+        except Exception as e:
+            error_msg = f"Optimized batch upsert failed: {str(e)}"
+            self.logger.error(error_msg)
+            raise PostgreSQLQueryError(error_msg)
+    
+    def bulk_upsert_with_staging(self, table_name: str, data: List[Dict[str, Any]], 
+                                schema_name: str = None, conflict_columns: Optional[List[str]] = None,
+                                use_copy: bool = True) -> Dict[str, Any]:
+        """
+        High-performance bulk upsert using staging table and COPY operations.
+        
+        Args:
+            table_name: Name of the target table
+            data: List of dictionaries containing the data to upsert
+            schema_name: Schema name (optional)
+            conflict_columns: Specific columns for conflict resolution
+            use_copy: Whether to use COPY for initial data loading (fastest)
+            
+        Returns:
+            Dict containing operation results and statistics
+            
+        Raises:
+            PostgreSQLQueryError: If bulk upsert operation fails
+        """
+        if not data:
+            raise ValueError("Data cannot be empty")
+        
+        try:
+            import time
+            import io
+            import csv
+            
+            full_table_name = f'"{schema_name}"."{table_name}"' if schema_name else f'"{table_name}"'
+            staging_table_name = f"{table_name}_staging_{int(time.time())}"
+            full_staging_name = f'"{schema_name}"."{staging_table_name}"' if schema_name else f'"{staging_table_name}"'
+            
+            # Auto-detect conflict columns if not provided
+            if conflict_columns is None:
+                conflict_columns = self.detect_conflict_columns(table_name, data, schema_name)
+            
+            # Get table schema
+            table_schema = self.get_table_schema(table_name, schema_name)
+            column_info = {col['column_name']: col for col in table_schema}
+            
+            staging_created = False
+            start_time = time.time()
+            
+            try:
+                # Create staging table with same structure
+                self.logger.info(f"Creating staging table {full_staging_name}")
+                create_staging_query = f"CREATE TEMP TABLE {staging_table_name} (LIKE {full_table_name})"
+                self.execute_query(create_staging_query)
+                staging_created = True
+                
+                # Preprocess data
+                processed_data = self._preprocess_data(data, column_info)
+                
+                if use_copy and len(processed_data) > 1000:
+                    # Use COPY for large datasets (most efficient)
+                    self._bulk_copy_to_staging(staging_table_name, processed_data, column_info)
+                else:
+                    # Use regular batch insert for smaller datasets
+                    self.insert_data(staging_table_name, processed_data, None, batch_size=5000, on_conflict='error')
+                
+                # Perform upsert from staging to main table
+                rows_affected = self._upsert_from_staging(
+                    full_table_name, full_staging_name, conflict_columns, column_info
+                )
+                
+                # Drop staging table
+                self.execute_query(f"DROP TABLE {staging_table_name}")
+                staging_created = False
+                
+                end_time = time.time()
+                
+                # Return operation statistics
+                result = {
+                    'success': True,
+                    'table_name': full_table_name,
+                    'operation': 'bulk_upsert_staging',
+                    'rows_processed': rows_affected,
+                    'conflict_columns': conflict_columns,
+                    'use_copy': use_copy,
+                    'execution_time_seconds': round(end_time - start_time, 2),
+                    'rows_per_second': round(rows_affected / (end_time - start_time), 2) if (end_time - start_time) > 0 else 0
+                }
+                
+                self.logger.info(f"Bulk upsert with staging completed successfully: {result}")
+                return result
+                
+            except Exception as e:
+                # Clean up staging table if it exists
+                if staging_created:
+                    try:
+                        self.execute_query(f"DROP TABLE IF EXISTS {staging_table_name}")
+                        self.logger.info(f"Cleaned up staging table {full_staging_name}")
+                    except Exception as cleanup_error:
+                        self.logger.warning(f"Failed to clean up staging table: {str(cleanup_error)}")
+                raise
+                
+        except Exception as e:
+            error_msg = f"Failed to perform bulk upsert with staging on {table_name}: {str(e)}"
+            self.logger.error(error_msg)
+            raise PostgreSQLQueryError(error_msg)
+    
+    def _bulk_copy_to_staging(self, staging_table_name: str, data: List[Dict[str, Any]], 
+                             column_info: Dict[str, Dict[str, Any]]) -> None:
+        """
+        Use PostgreSQL COPY to bulk load data into staging table.
+        
+        Args:
+            staging_table_name: Name of the staging table
+            data: Preprocessed data to load
+            column_info: Column information from table schema
+        """
+        try:
+            import io
+            import csv
+            
+            # Get all columns present in data
+            all_columns = set()
+            for row in data:
+                all_columns.update(row.keys())
+            
+            # Filter and sort columns
+            columns = sorted([col for col in all_columns if col in column_info])
+            
+            # Create CSV data in memory
+            csv_buffer = io.StringIO()
+            writer = csv.writer(csv_buffer)
+            
+            for row in data:
+                csv_row = [row.get(col) for col in columns]
+                writer.writerow(csv_row)
+            
+            csv_buffer.seek(0)
+            
+            # Use COPY to load data
+            with self._get_connection() as connection:
+                with connection.cursor() as cursor:
+                    column_list = ', '.join(f'"{col}"' for col in columns)
+                    copy_query = f"COPY {staging_table_name} ({column_list}) FROM STDIN WITH CSV"
+                    
+                    cursor.copy_expert(copy_query, csv_buffer)
+                    connection.commit()
+                    
+                    self.logger.info(f"Bulk copied {len(data)} rows to staging table using COPY")
+                    
+        except Exception as e:
+            error_msg = f"Failed to bulk copy data to staging table: {str(e)}"
+            self.logger.error(error_msg)
+            raise PostgreSQLQueryError(error_msg)
+    
+    def _upsert_from_staging(self, main_table: str, staging_table: str, 
+                            conflict_columns: List[str], 
+                            column_info: Dict[str, Dict[str, Any]]) -> int:
+        """
+        Perform upsert from staging table to main table.
+        
+        Args:
+            main_table: Full name of the main table
+            staging_table: Full name of the staging table
+            conflict_columns: Columns for conflict resolution
+            column_info: Column information from table schema
+            
+        Returns:
+            int: Number of rows affected
+        """
+        try:
+            # Get columns from staging table
+            staging_columns_query = f"""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = '{staging_table.split('.')[-1].strip('"')}'
+                ORDER BY ordinal_position
+            """
+            
+            staging_cols_result = self.execute_query(staging_columns_query)
+            staging_columns = [row['column_name'] for row in staging_cols_result]
+            
+            # Filter columns that exist in both tables
+            common_columns = [col for col in staging_columns if col in column_info]
+            
+            # Build upsert query from staging
+            column_list = ', '.join(f'"{col}"' for col in common_columns)
+            conflict_list = ', '.join(f'"{col}"' for col in conflict_columns)
+            
+            # Update columns (exclude conflict columns)
+            update_columns = [col for col in common_columns if col not in conflict_columns]
+            update_set = ', '.join(f'"{col}" = EXCLUDED."{col}"' for col in update_columns)
+            
+            if update_set:
+                upsert_query = f"""
+                    INSERT INTO {main_table} ({column_list})
+                    SELECT {column_list} FROM {staging_table}
+                    ON CONFLICT ({conflict_list})
+                    DO UPDATE SET {update_set}
+                """
+            else:
+                upsert_query = f"""
+                    INSERT INTO {main_table} ({column_list})
+                    SELECT {column_list} FROM {staging_table}
+                    ON CONFLICT ({conflict_list})
+                    DO NOTHING
+                """
+            
+            # Execute upsert
+            with self._get_connection() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(upsert_query)
+                    rows_affected = cursor.rowcount
+                    connection.commit()
+                    
+                    self.logger.info(f"Upserted {rows_affected} rows from staging to main table")
+                    return rows_affected
+                    
+        except Exception as e:
+            error_msg = f"Failed to upsert from staging table: {str(e)}"
+            self.logger.error(error_msg)
+            raise PostgreSQLQueryError(error_msg)
