@@ -6,5 +6,6 @@ for connecting to various database systems.
 """
 
 from .database_connector import DatabaseConnector
+from .postgresql_connector import PostgreSQLConnector
 
-__all__ = ["DatabaseConnector"]
+__all__ = ["DatabaseConnector", "PostgreSQLConnector"]
