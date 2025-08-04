@@ -1333,3 +1333,381 @@ class PostgreSQLConnector(DatabaseConnector):
             error_msg = f"Batch upsert failed: {str(e)}"
             self.logger.error(error_msg)
             raise PostgreSQLQueryError(error_msg)
+    
+    def truncate_table(self, table_name: str, schema_name: str = None, 
+                       cascade: bool = False, restart_identity: bool = False) -> bool:
+        """
+        Truncate a PostgreSQL table, removing all data while preserving structure.
+        
+        Args:
+            table_name: Name of the table to truncate
+            schema_name: Schema name (optional)
+            cascade: Whether to truncate tables that have foreign-key references
+            restart_identity: Whether to restart identity columns
+            
+        Returns:
+            bool: True if truncation was successful
+            
+        Raises:
+            PostgreSQLQueryError: If truncation fails
+        """
+        try:
+            full_table_name = f'"{schema_name}"."{table_name}"' if schema_name else f'"{table_name}"'
+            
+            # Validate table exists
+            if not self.table_exists(table_name, schema_name):
+                raise PostgreSQLQueryError(f"Table {full_table_name} does not exist")
+            
+            # Build TRUNCATE statement
+            truncate_parts = ["TRUNCATE TABLE", full_table_name]
+            
+            if restart_identity:
+                truncate_parts.append("RESTART IDENTITY")
+            
+            if cascade:
+                truncate_parts.append("CASCADE")
+            
+            truncate_query = " ".join(truncate_parts)
+            
+            self.logger.info(f"Truncating table {full_table_name}")
+            self.execute_query(truncate_query)
+            
+            self.logger.info(f"Successfully truncated table {full_table_name}")
+            return True
+            
+        except Exception as e:
+            error_msg = f"Failed to truncate table {table_name}: {str(e)}"
+            self.logger.error(error_msg)
+            raise PostgreSQLQueryError(error_msg)
+    
+    def replace_data(self, table_name: str, data: List[Dict[str, Any]], 
+                     schema_name: str = None, batch_size: int = 1000,
+                     use_transaction: bool = True, backup_strategy: str = 'truncate') -> int:
+        """
+        Replace all data in a PostgreSQL table using atomic operations.
+        
+        This method provides several strategies for replacing data:
+        - 'truncate': Truncate table and insert new data (fastest)
+        - 'backup': Create backup table, replace data, drop backup on success
+        - 'temp': Use temporary table for atomic replacement
+        
+        Args:
+            table_name: Name of the target table
+            data: List of dictionaries containing the new data
+            schema_name: Schema name (optional)  
+            batch_size: Number of rows to process per batch
+            use_transaction: Whether to wrap operation in a transaction
+            backup_strategy: Strategy for atomic replacement ('truncate', 'backup', 'temp')
+            
+        Returns:
+            int: Number of rows inserted
+            
+        Raises:
+            PostgreSQLQueryError: If replace operation fails
+            ValueError: If parameters are invalid
+        """
+        if not data:
+            raise ValueError("Data cannot be empty")
+        
+        if not isinstance(data, list):
+            raise ValueError("Data must be a list of dictionaries")
+        
+        if backup_strategy not in ['truncate', 'backup', 'temp']:
+            raise ValueError("backup_strategy must be 'truncate', 'backup', or 'temp'")
+        
+        try:
+            full_table_name = f'"{schema_name}"."{table_name}"' if schema_name else f'"{table_name}"'
+            
+            # Validate table exists
+            if not self.table_exists(table_name, schema_name):
+                raise PostgreSQLQueryError(f"Table {full_table_name} does not exist")
+            
+            self.logger.info(f"Starting replace operation for {full_table_name} with {len(data)} rows using {backup_strategy} strategy")
+            
+            if backup_strategy == 'truncate':
+                return self._replace_with_truncate(table_name, data, schema_name, batch_size, use_transaction)
+            elif backup_strategy == 'backup':
+                return self._replace_with_backup(table_name, data, schema_name, batch_size, use_transaction)
+            elif backup_strategy == 'temp':
+                return self._replace_with_temp_table(table_name, data, schema_name, batch_size, use_transaction)
+                
+        except Exception as e:
+            error_msg = f"Failed to replace data in {table_name}: {str(e)}"
+            self.logger.error(error_msg)
+            raise PostgreSQLQueryError(error_msg)
+    
+    def _replace_with_truncate(self, table_name: str, data: List[Dict[str, Any]], 
+                              schema_name: str, batch_size: int, use_transaction: bool) -> int:
+        """
+        Replace data using TRUNCATE strategy (fastest but less safe).
+        
+        Args:
+            table_name: Name of the target table
+            data: Data to insert
+            schema_name: Schema name
+            batch_size: Batch size for insertion
+            use_transaction: Whether to use transaction
+            
+        Returns:
+            int: Number of rows inserted
+        """
+        full_table_name = f'"{schema_name}"."{table_name}"' if schema_name else f'"{table_name}"'
+        
+        if use_transaction:
+            # Use transaction for atomicity
+            transaction_started = False
+            try:
+                if not self.in_transaction:
+                    self.begin_transaction()
+                    transaction_started = True
+                
+                # Truncate table
+                self.truncate_table(table_name, schema_name, restart_identity=True)
+                
+                # Insert new data
+                rows_inserted = self.insert_data(table_name, data, schema_name, batch_size, on_conflict='error')
+                
+                if transaction_started:
+                    self.commit_transaction()
+                
+                self.logger.info(f"Successfully replaced data in {full_table_name} using truncate strategy")
+                return rows_inserted
+                
+            except Exception as e:
+                if transaction_started and self.in_transaction:
+                    self.rollback_transaction()
+                    self.logger.error(f"Transaction rolled back due to error: {str(e)}")
+                raise
+        else:
+            # Non-transactional approach (less safe)
+            self.truncate_table(table_name, schema_name, restart_identity=True)
+            rows_inserted = self.insert_data(table_name, data, schema_name, batch_size, on_conflict='error')
+            
+            self.logger.info(f"Successfully replaced data in {full_table_name} using truncate strategy (non-transactional)")
+            return rows_inserted
+    
+    def _replace_with_backup(self, table_name: str, data: List[Dict[str, Any]], 
+                            schema_name: str, batch_size: int, use_transaction: bool) -> int:
+        """
+        Replace data using backup table strategy (safer but slower).
+        
+        Args:
+            table_name: Name of the target table
+            data: Data to insert
+            schema_name: Schema name
+            batch_size: Batch size for insertion
+            use_transaction: Whether to use transaction
+            
+        Returns:
+            int: Number of rows inserted
+        """
+        import time
+        
+        full_table_name = f'"{schema_name}"."{table_name}"' if schema_name else f'"{table_name}"'
+        backup_table_name = f"{table_name}_backup_{int(time.time())}"
+        full_backup_name = f'"{schema_name}"."{backup_table_name}"' if schema_name else f'"{backup_table_name}"'
+        
+        transaction_started = False
+        backup_created = False
+        
+        try:
+            if use_transaction and not self.in_transaction:
+                self.begin_transaction()
+                transaction_started = True
+            
+            # Create backup table
+            self.logger.info(f"Creating backup table {full_backup_name}")
+            create_backup_query = f"CREATE TABLE {full_backup_name} AS SELECT * FROM {full_table_name}"
+            self.execute_query(create_backup_query)
+            backup_created = True
+            
+            # Truncate original table
+            self.truncate_table(table_name, schema_name, restart_identity=True)
+            
+            # Insert new data
+            rows_inserted = self.insert_data(table_name, data, schema_name, batch_size, on_conflict='error')
+            
+            # Drop backup table on success
+            self.drop_table(backup_table_name, schema_name, if_exists=True)
+            backup_created = False
+            
+            if transaction_started:
+                self.commit_transaction()
+            
+            self.logger.info(f"Successfully replaced data in {full_table_name} using backup strategy")
+            return rows_inserted
+            
+        except Exception as e:
+            # Restore from backup if operation failed
+            if backup_created:
+                try:
+                    self.logger.warning(f"Restoring data from backup table {full_backup_name}")
+                    
+                    # Truncate original table and restore from backup
+                    self.truncate_table(table_name, schema_name)
+                    restore_query = f"INSERT INTO {full_table_name} SELECT * FROM {full_backup_name}"
+                    self.execute_query(restore_query)
+                    
+                    # Drop backup table
+                    self.drop_table(backup_table_name, schema_name, if_exists=True)
+                    
+                    self.logger.info(f"Successfully restored data from backup")
+                    
+                except Exception as restore_error:
+                    self.logger.error(f"Failed to restore from backup: {str(restore_error)}")
+            
+            if transaction_started and self.in_transaction:
+                self.rollback_transaction()
+                self.logger.error(f"Transaction rolled back due to error: {str(e)}")
+            
+            raise
+    
+    def _replace_with_temp_table(self, table_name: str, data: List[Dict[str, Any]], 
+                                schema_name: str, batch_size: int, use_transaction: bool) -> int:
+        """
+        Replace data using temporary table strategy (most atomic).
+        
+        Args:
+            table_name: Name of the target table
+            data: Data to insert  
+            schema_name: Schema name
+            batch_size: Batch size for insertion
+            use_transaction: Whether to use transaction
+            
+        Returns:
+            int: Number of rows inserted
+        """
+        import time
+        
+        full_table_name = f'"{schema_name}"."{table_name}"' if schema_name else f'"{table_name}"'
+        temp_table_name = f"{table_name}_temp_{int(time.time())}"
+        full_temp_name = f'"{schema_name}"."{temp_table_name}"' if schema_name else f'"{temp_table_name}"'
+        
+        transaction_started = False
+        temp_created = False
+        
+        try:
+            if use_transaction and not self.in_transaction:
+                self.begin_transaction()
+                transaction_started = True
+            
+            # Get original table schema
+            table_schema = self.get_table_schema(table_name, schema_name)
+            
+            # Create temporary table with same structure
+            self.logger.info(f"Creating temporary table {full_temp_name}")
+            create_temp_query = f"CREATE TABLE {full_temp_name} (LIKE {full_table_name} INCLUDING ALL)"
+            self.execute_query(create_temp_query)
+            temp_created = True
+            
+            # Insert new data into temporary table
+            rows_inserted = self.insert_data(temp_table_name, data, schema_name, batch_size, on_conflict='error')
+            
+            # Atomic swap: rename tables
+            self.logger.info(f"Performing atomic table swap")
+            
+            # Drop original table and rename temp table
+            swap_queries = [
+                f"DROP TABLE {full_table_name}",
+                f"ALTER TABLE {full_temp_name} RENAME TO \"{table_name}\""
+            ]
+            
+            for query in swap_queries:
+                self.execute_query(query)
+            
+            temp_created = False  # Table was renamed, no longer temp
+            
+            if transaction_started:
+                self.commit_transaction()
+            
+            self.logger.info(f"Successfully replaced data in {full_table_name} using temp table strategy")
+            return rows_inserted
+            
+        except Exception as e:
+            # Clean up temporary table if it exists
+            if temp_created:
+                try:
+                    self.drop_table(temp_table_name, schema_name, if_exists=True)
+                    self.logger.info(f"Cleaned up temporary table {full_temp_name}")
+                except Exception as cleanup_error:
+                    self.logger.warning(f"Failed to clean up temporary table: {str(cleanup_error)}")
+            
+            if transaction_started and self.in_transaction:
+                self.rollback_transaction()
+                self.logger.error(f"Transaction rolled back due to error: {str(e)}")
+            
+            raise
+    
+    def replace_data_with_validation(self, table_name: str, data: List[Dict[str, Any]], 
+                                   schema_name: str = None, batch_size: int = 1000,
+                                   backup_strategy: str = 'backup', 
+                                   validation_sample_size: int = 100) -> Dict[str, Any]:
+        """
+        Replace data with pre-validation and detailed reporting.
+        
+        Args:
+            table_name: Name of the target table
+            data: List of dictionaries containing the new data
+            schema_name: Schema name (optional)
+            batch_size: Number of rows to process per batch
+            backup_strategy: Strategy for replacement ('truncate', 'backup', 'temp')
+            validation_sample_size: Number of rows to validate before full replacement
+            
+        Returns:
+            Dict containing operation results and statistics
+            
+        Raises:
+            PostgreSQLQueryError: If replace operation fails
+            ValueError: If validation fails
+        """
+        try:
+            import time
+            
+            full_table_name = f'"{schema_name}"."{table_name}"' if schema_name else f'"{table_name}"'
+            
+            # Get current row count
+            count_query = f"SELECT COUNT(*) as count FROM {full_table_name}"
+            current_count = self.execute_query(count_query)[0]['count']
+            
+            # Get table schema for validation
+            table_schema = self.get_table_schema(table_name, schema_name)
+            column_info = {col['column_name']: col for col in table_schema}
+            
+            # Validate sample data
+            validation_data = data[:validation_sample_size]
+            self.logger.info(f"Validating {len(validation_data)} sample rows before replacement")
+            
+            try:
+                self._preprocess_data(validation_data, column_info)
+                self.logger.info("Data validation passed")
+            except Exception as e:
+                raise ValueError(f"Data validation failed: {str(e)}")
+            
+            # Perform replacement
+            start_time = time.time()
+            rows_inserted = self.replace_data(
+                table_name, data, schema_name, batch_size, 
+                use_transaction=True, backup_strategy=backup_strategy
+            )
+            end_time = time.time()
+            
+            # Return operation statistics
+            result = {
+                'success': True,
+                'table_name': full_table_name,
+                'strategy': backup_strategy,
+                'original_row_count': current_count,
+                'new_row_count': rows_inserted,
+                'rows_changed': rows_inserted - current_count,
+                'execution_time_seconds': round(end_time - start_time, 2),
+                'batch_size': batch_size,
+                'validation_sample_size': validation_sample_size
+            }
+            
+            self.logger.info(f"Replace operation completed successfully: {result}")
+            return result
+            
+        except Exception as e:
+            error_msg = f"Failed to replace data with validation in {table_name}: {str(e)}"
+            self.logger.error(error_msg)
+            raise PostgreSQLQueryError(error_msg)
