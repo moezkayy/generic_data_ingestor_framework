@@ -32,7 +32,9 @@ class DataIngestionApplication:
     def run(self, directory: str, output_dir: str, log_level: str = 'INFO',
             dry_run: bool = False, file_types: List[str] = None,
             recursive: bool = True, validate_schemas: bool = True,
-            generate_flat_versions: bool = True) -> int:
+            generate_flat_versions: bool = True, db_config: Optional[Dict[str, Any]] = None,
+            table_name: Optional[str] = None, load_strategy: Optional[str] = None,
+            batch_size: Optional[int] = None, create_table: Optional[bool] = None) -> int:
 
         start_time = time.time()
 
@@ -81,6 +83,17 @@ class DataIngestionApplication:
                 validate_schemas=validate_schemas,
                 generate_flat_versions=generate_flat_versions
             )
+
+            # Load to database if configured
+            if db_config and processing_results:
+                self._load_to_database(
+                    processing_results,
+                    db_config,
+                    table_name or 'ingested_data',
+                    load_strategy or 'append',
+                    batch_size or 1000,
+                    create_table if create_table is not None else True
+                )
 
             # Generate reports
             self._generate_reports(processing_results, output_path)
@@ -563,3 +576,64 @@ class DataIngestionApplication:
             
         except Exception:
             return []
+    
+    def _load_to_database(self, processing_results: Dict[str, Any], db_config: Dict[str, Any],
+                         table_name: str, load_strategy: str, batch_size: int, create_table: bool):
+        """
+        Load processing results to database.
+        
+        Args:
+            processing_results: Results from file processing
+            db_config: Database configuration
+            table_name: Target table name
+            load_strategy: Loading strategy (append, replace, upsert)
+            batch_size: Batch size for loading
+            create_table: Whether to create table if not exists
+        """
+        try:
+            self.logger.info(f"🗄️  Loading processed data to database...")
+            
+            # Collect all processed data
+            all_data = []
+            total_files = 0
+            successful_files = 0
+            
+            for file_type, results in processing_results.items():
+                if isinstance(results, list):
+                    for result in results:
+                        total_files += 1
+                        if result.get('success', False) and result.get('processed_data'):
+                            successful_files += 1
+                            # Add metadata to each record
+                            for record in result['processed_data']:
+                                if isinstance(record, dict):
+                                    record['_source_file'] = result.get('file_path', 'unknown')
+                                    record['_file_type'] = file_type
+                                    record['_processing_timestamp'] = result.get('processing_time', '')
+                                    all_data.append(record)
+            
+            if not all_data:
+                self.logger.warning("⚠️  No data available for database loading")
+                return
+            
+            self.logger.info(f"📊 Collected {len(all_data)} records from {successful_files}/{total_files} files")
+            
+            # Load to database using the existing method
+            load_result = self.load_to_database(
+                data=all_data,
+                table_name=table_name,
+                db_config=db_config,
+                strategy=load_strategy,
+                create_table=create_table,
+                batch_size=batch_size
+            )
+            
+            if load_result.get('success'):
+                self.logger.info(f"✅ Database loading completed successfully")
+                self.logger.info(f"📈 Loaded {load_result['records_loaded']} records in {load_result['execution_time_seconds']}s")
+            else:
+                self.logger.error(f"❌ Database loading failed: {load_result.get('error', 'Unknown error')}")
+                
+        except Exception as e:
+            self.logger.error(f"❌ Database loading failed: {str(e)}")
+            # Don't raise exception to allow file processing to complete
