@@ -524,3 +524,352 @@ class PostgreSQLConnector(DatabaseConnector):
             error_msg = f"Failed to get table schema for {table_name}: {str(e)}"
             self.logger.error(error_msg)
             raise PostgreSQLQueryError(error_msg)
+    
+    def table_exists(self, table_name: str, schema_name: str = None) -> bool:
+        """
+        Check if a table exists in the PostgreSQL database.
+        
+        Args:
+            table_name: Name of the table to check
+            schema_name: Schema name (defaults to current schema)
+            
+        Returns:
+            bool: True if table exists, False otherwise
+            
+        Raises:
+            PostgreSQLQueryError: If existence check fails
+        """
+        try:
+            query = """
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.tables 
+                    WHERE table_name = %s
+            """
+            params = [table_name]
+            
+            if schema_name:
+                query += " AND table_schema = %s"
+                params.append(schema_name)
+            else:
+                query += " AND table_schema = current_schema()"
+            
+            query += ")"
+            
+            result = self.execute_query(query, params)
+            exists = result[0]['exists'] if result else False
+            
+            self.logger.debug(f"Table existence check for {table_name}: {exists}")
+            return exists
+            
+        except Exception as e:
+            error_msg = f"Failed to check table existence for {table_name}: {str(e)}"
+            self.logger.error(error_msg)
+            raise PostgreSQLQueryError(error_msg)
+    
+    def schema_to_ddl(self, table_name: str, schema: List[Dict[str, Any]], 
+                      schema_name: str = None, if_not_exists: bool = True) -> str:
+        """
+        Convert a schema definition to PostgreSQL DDL (Data Definition Language).
+        
+        Args:
+            table_name: Name of the table to create
+            schema: List of column definitions with keys: name, type, nullable, default, etc.
+            schema_name: Schema name to create table in (optional)
+            if_not_exists: Whether to include IF NOT EXISTS clause
+            
+        Returns:
+            str: PostgreSQL DDL CREATE TABLE statement
+            
+        Raises:
+            ValueError: If schema is invalid or empty
+        """
+        if not schema or not isinstance(schema, list):
+            raise ValueError("Schema must be a non-empty list")
+        
+        if not table_name or not table_name.strip():
+            raise ValueError("Table name cannot be empty")
+        
+        # Build table name with schema if provided
+        full_table_name = f'"{schema_name}"."{table_name}"' if schema_name else f'"{table_name}"'
+        
+        # Start building DDL
+        ddl_parts = ["CREATE TABLE"]
+        
+        if if_not_exists:
+            ddl_parts.append("IF NOT EXISTS")
+        
+        ddl_parts.append(full_table_name)
+        ddl_parts.append("(")
+        
+        # Process columns
+        column_definitions = []
+        primary_keys = []
+        
+        for i, column in enumerate(schema):
+            if not isinstance(column, dict):
+                raise ValueError(f"Column {i} must be a dictionary")
+            
+            if 'name' not in column:
+                raise ValueError(f"Column {i} missing required 'name' field")
+            
+            if 'type' not in column:
+                raise ValueError(f"Column {i} missing required 'type' field")
+            
+            col_name = column['name'].strip()
+            if not col_name:
+                raise ValueError(f"Column {i} name cannot be empty")
+            
+            # Build column definition
+            col_def = [f'"{col_name}"']
+            
+            # Map data type
+            pg_type = self._map_data_type(column['type'])
+            col_def.append(pg_type)
+            
+            # Handle constraints
+            if not column.get('nullable', True):
+                col_def.append("NOT NULL")
+            
+            if 'default' in column and column['default'] is not None:
+                default_value = self._format_default_value(column['default'], column['type'])
+                col_def.append(f"DEFAULT {default_value}")
+            
+            if column.get('unique', False):
+                col_def.append("UNIQUE")
+            
+            if column.get('primary_key', False):
+                primary_keys.append(col_name)
+            
+            column_definitions.append(" ".join(col_def))
+        
+        # Add primary key constraint if specified
+        if primary_keys:
+            pk_cols = ', '.join(f'"{pk}"' for pk in primary_keys)
+            column_definitions.append(f"PRIMARY KEY ({pk_cols})")
+        
+        # Combine all parts
+        ddl_parts.append(",\n    ".join(column_definitions))
+        ddl_parts.append(")")
+        
+        ddl = " ".join(ddl_parts[:3]) + "\n(\n    " + ",\n    ".join(column_definitions) + "\n)"
+        
+        self.logger.debug(f"Generated DDL for table {table_name}: {ddl}")
+        return ddl
+    
+    def _map_data_type(self, data_type: str) -> str:
+        """
+        Map generic data types to PostgreSQL-specific types.
+        
+        Args:
+            data_type: Generic data type string
+            
+        Returns:
+            str: PostgreSQL-specific data type
+        """
+        # Normalize input
+        data_type = str(data_type).lower().strip()
+        
+        # PostgreSQL type mappings
+        type_mappings = {
+            # String types
+            'string': 'TEXT',
+            'str': 'TEXT',
+            'text': 'TEXT',
+            'varchar': 'VARCHAR',
+            'char': 'CHAR',
+            
+            # Numeric types
+            'int': 'INTEGER',
+            'integer': 'INTEGER',
+            'bigint': 'BIGINT',
+            'smallint': 'SMALLINT',
+            'float': 'REAL',
+            'double': 'DOUBLE PRECISION',
+            'decimal': 'DECIMAL',
+            'numeric': 'NUMERIC',
+            'money': 'MONEY',
+            
+            # Boolean type
+            'bool': 'BOOLEAN',
+            'boolean': 'BOOLEAN',
+            
+            # Date/time types
+            'date': 'DATE',
+            'time': 'TIME',
+            'datetime': 'TIMESTAMP',
+            'timestamp': 'TIMESTAMP',
+            'timestamptz': 'TIMESTAMPTZ',
+            
+            # JSON types
+            'json': 'JSON',
+            'jsonb': 'JSONB',
+            
+            # Binary types
+            'binary': 'BYTEA',
+            'blob': 'BYTEA',
+            
+            # UUID type
+            'uuid': 'UUID',
+            
+            # Array types
+            'array': 'TEXT[]',
+        }
+        
+        # Handle parameterized types (e.g., VARCHAR(255))
+        if '(' in data_type:
+            base_type = data_type.split('(')[0]
+            if base_type in type_mappings:
+                # For parameterized types, preserve the parameters
+                return data_type.upper()
+        
+        # Return mapped type or original if not found
+        return type_mappings.get(data_type, data_type.upper())
+    
+    def _format_default_value(self, default_value: Any, data_type: str) -> str:
+        """
+        Format default value for PostgreSQL DDL.
+        
+        Args:
+            default_value: The default value
+            data_type: The column data type
+            
+        Returns:
+            str: Formatted default value for DDL
+        """
+        if default_value is None:
+            return "NULL"
+        
+        data_type = str(data_type).lower()
+        
+        # Handle string/text types
+        if data_type in ['string', 'str', 'text', 'varchar', 'char']:
+            # Escape single quotes and wrap in quotes
+            escaped_value = str(default_value).replace("'", "''")
+            return f"'{escaped_value}'"
+        
+        # Handle boolean types
+        if data_type in ['bool', 'boolean']:
+            return 'TRUE' if default_value else 'FALSE'
+        
+        # Handle numeric types
+        if data_type in ['int', 'integer', 'bigint', 'smallint', 'float', 'double', 'decimal', 'numeric']:
+            return str(default_value)
+        
+        # Handle date/time types
+        if data_type in ['date', 'time', 'datetime', 'timestamp']:
+            if str(default_value).upper() in ['NOW()', 'CURRENT_TIMESTAMP', 'CURRENT_DATE', 'CURRENT_TIME']:
+                return str(default_value).upper()
+            else:
+                return f"'{default_value}'"
+        
+        # Handle JSON types
+        if data_type in ['json', 'jsonb']:
+            if isinstance(default_value, (dict, list)):
+                import json
+                return f"'{json.dumps(default_value)}'"
+            else:
+                return f"'{default_value}'"
+        
+        # Default: treat as string
+        return f"'{default_value}'"
+    
+    def create_table(self, table_name: str, schema: List[Dict[str, Any]], 
+                     schema_name: str = None, if_not_exists: bool = True,
+                     drop_if_exists: bool = False) -> bool:
+        """
+        Create a table in the PostgreSQL database based on a schema definition.
+        
+        Args:
+            table_name: Name of the table to create
+            schema: List of column definitions
+            schema_name: Schema name to create table in (optional)
+            if_not_exists: Whether to use IF NOT EXISTS clause (ignored if drop_if_exists=True)
+            drop_if_exists: Whether to drop the table if it already exists
+            
+        Returns:
+            bool: True if table was created successfully, False otherwise
+            
+        Raises:
+            PostgreSQLQueryError: If table creation fails
+            ValueError: If schema is invalid
+        """
+        try:
+            full_table_name = f'"{schema_name}"."{table_name}"' if schema_name else f'"{table_name}"'
+            
+            # Check if table exists
+            table_exists = self.table_exists(table_name, schema_name)
+            
+            if table_exists:
+                if drop_if_exists:
+                    self.logger.info(f"Dropping existing table {full_table_name}")
+                    drop_ddl = f"DROP TABLE {full_table_name}"
+                    self.execute_query(drop_ddl)
+                elif not if_not_exists:
+                    raise PostgreSQLQueryError(f"Table {full_table_name} already exists")
+                else:
+                    self.logger.info(f"Table {full_table_name} already exists, skipping creation")
+                    return True
+            
+            # Generate DDL
+            use_if_not_exists = if_not_exists and not drop_if_exists
+            ddl = self.schema_to_ddl(table_name, schema, schema_name, use_if_not_exists)
+            
+            # Execute DDL
+            self.logger.info(f"Creating table {full_table_name}")
+            self.execute_query(ddl)
+            
+            # Verify table was created
+            if self.table_exists(table_name, schema_name):
+                self.logger.info(f"Successfully created table {full_table_name}")
+                return True
+            else:
+                raise PostgreSQLQueryError(f"Table {full_table_name} was not created")
+            
+        except Exception as e:
+            error_msg = f"Failed to create table {table_name}: {str(e)}"
+            self.logger.error(error_msg)
+            raise PostgreSQLQueryError(error_msg)
+    
+    def drop_table(self, table_name: str, schema_name: str = None, 
+                   if_exists: bool = True, cascade: bool = False) -> bool:
+        """
+        Drop a table from the PostgreSQL database.
+        
+        Args:
+            table_name: Name of the table to drop
+            schema_name: Schema name (optional)
+            if_exists: Whether to use IF EXISTS clause
+            cascade: Whether to use CASCADE option
+            
+        Returns:
+            bool: True if table was dropped successfully, False otherwise
+            
+        Raises:
+            PostgreSQLQueryError: If table drop fails
+        """
+        try:
+            full_table_name = f'"{schema_name}"."{table_name}"' if schema_name else f'"{table_name}"'
+            
+            # Build DROP statement
+            drop_parts = ["DROP TABLE"]
+            
+            if if_exists:
+                drop_parts.append("IF EXISTS")
+            
+            drop_parts.append(full_table_name)
+            
+            if cascade:
+                drop_parts.append("CASCADE")
+            
+            drop_ddl = " ".join(drop_parts)
+            
+            self.logger.info(f"Dropping table {full_table_name}")
+            self.execute_query(drop_ddl)
+            
+            self.logger.info(f"Successfully dropped table {full_table_name}")
+            return True
+            
+        except Exception as e:
+            error_msg = f"Failed to drop table {table_name}: {str(e)}"
+            self.logger.error(error_msg)
+            raise PostgreSQLQueryError(error_msg)
