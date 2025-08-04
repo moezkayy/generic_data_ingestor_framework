@@ -555,3 +555,448 @@ class MySQLConnector(DatabaseConnector):
             error_msg = f"Failed to get table schema for {table_name}: {str(e)}"
             self.logger.error(error_msg)
             raise MySQLQueryError(error_msg)
+    
+    def table_exists(self, table_name: str, schema_name: str = None) -> bool:
+        """
+        Check if a table exists in the MySQL database.
+        
+        Args:
+            table_name: Name of the table to check
+            schema_name: Schema name (database name in MySQL, defaults to current database)
+            
+        Returns:
+            bool: True if table exists, False otherwise
+            
+        Raises:
+            MySQLQueryError: If existence check fails
+        """
+        try:
+            query = """
+                SELECT COUNT(*) as count 
+                FROM INFORMATION_SCHEMA.TABLES 
+                WHERE TABLE_NAME = %s
+            """
+            params = [table_name]
+            
+            if schema_name:
+                query += " AND TABLE_SCHEMA = %s"
+                params.append(schema_name)
+            else:
+                query += " AND TABLE_SCHEMA = DATABASE()"
+            
+            result = self.execute_query(query, params)
+            exists = result[0]['count'] > 0 if result else False
+            
+            self.logger.debug(f"Table existence check for {table_name}: {exists}")
+            return exists
+            
+        except Exception as e:
+            error_msg = f"Failed to check table existence for {table_name}: {str(e)}"
+            self.logger.error(error_msg)
+            raise MySQLQueryError(error_msg)
+    
+    def schema_to_ddl(self, table_name: str, schema: List[Dict[str, Any]], 
+                      schema_name: str = None, if_not_exists: bool = True,
+                      engine: str = 'InnoDB', charset: str = 'utf8mb4') -> str:
+        """
+        Convert a schema definition to MySQL DDL (Data Definition Language).
+        
+        Args:
+            table_name: Name of the table to create
+            schema: List of column definitions with keys: name, type, nullable, default, etc.
+            schema_name: Schema name to create table in (optional)
+            if_not_exists: Whether to include IF NOT EXISTS clause
+            engine: MySQL storage engine (default: InnoDB)
+            charset: Character set for the table (default: utf8mb4)
+            
+        Returns:
+            str: MySQL DDL CREATE TABLE statement
+            
+        Raises:
+            ValueError: If schema is invalid or empty
+        """
+        if not schema or not isinstance(schema, list):
+            raise ValueError("Schema must be a non-empty list")
+        
+        if not table_name or not table_name.strip():
+            raise ValueError("Table name cannot be empty")
+        
+        # Build table name with schema if provided
+        full_table_name = f"`{schema_name}`.`{table_name}`" if schema_name else f"`{table_name}`"
+        
+        # Start building DDL
+        ddl_parts = ["CREATE TABLE"]
+        
+        if if_not_exists:
+            ddl_parts.append("IF NOT EXISTS")
+        
+        ddl_parts.append(full_table_name)
+        ddl_parts.append("(")
+        
+        # Process columns
+        column_definitions = []
+        primary_keys = []
+        unique_keys = []
+        indexes = []
+        
+        for i, column in enumerate(schema):
+            if not isinstance(column, dict):
+                raise ValueError(f"Column {i} must be a dictionary")
+            
+            if 'name' not in column:
+                raise ValueError(f"Column {i} missing required 'name' field")
+            
+            if 'type' not in column:
+                raise ValueError(f"Column {i} missing required 'type' field")
+            
+            col_name = column['name'].strip()
+            if not col_name:
+                raise ValueError(f"Column {i} name cannot be empty")
+            
+            # Build column definition
+            col_def = [f"`{col_name}`"]
+            
+            # Map data type
+            mysql_type = self._map_data_type(column['type'])
+            col_def.append(mysql_type)
+            
+            # Handle constraints
+            if not column.get('nullable', True):
+                col_def.append("NOT NULL")
+            
+            if 'default' in column and column['default'] is not None:
+                default_value = self._format_default_value(column['default'], column['type'])
+                col_def.append(f"DEFAULT {default_value}")
+            
+            if column.get('auto_increment', False):
+                col_def.append("AUTO_INCREMENT")
+            
+            if column.get('unique', False):
+                unique_keys.append(col_name)
+            
+            if column.get('primary_key', False):
+                primary_keys.append(col_name)
+            
+            if column.get('index', False):
+                indexes.append(col_name)
+            
+            # Add column comment if provided
+            if column.get('comment'):
+                escaped_comment = column['comment'].replace("'", "''")
+                col_def.append(f"COMMENT '{escaped_comment}'")
+            
+            column_definitions.append(" ".join(col_def))
+        
+        # Add primary key constraint if specified
+        if primary_keys:
+            pk_cols = ', '.join(f"`{pk}`" for pk in primary_keys)
+            column_definitions.append(f"PRIMARY KEY ({pk_cols})")
+        
+        # Add unique constraints
+        for unique_col in unique_keys:
+            if unique_col not in primary_keys:  # Don't duplicate primary key columns
+                column_definitions.append(f"UNIQUE KEY `uk_{unique_col}` (`{unique_col}`)")
+        
+        # Add indexes
+        for index_col in indexes:
+            if index_col not in primary_keys and index_col not in unique_keys:
+                column_definitions.append(f"KEY `idx_{index_col}` (`{index_col}`)")
+        
+        # Combine all parts
+        ddl = " ".join(ddl_parts[:3]) + "\n(\n    " + ",\n    ".join(column_definitions) + "\n)"
+        
+        # Add table options
+        table_options = []
+        table_options.append(f"ENGINE={engine}")
+        table_options.append(f"DEFAULT CHARSET={charset}")
+        
+        if charset == 'utf8mb4':
+            table_options.append("COLLATE=utf8mb4_unicode_ci")
+        
+        ddl += " " + " ".join(table_options)
+        
+        self.logger.debug(f"Generated DDL for table {table_name}: {ddl}")
+        return ddl
+    
+    def _map_data_type(self, data_type: str) -> str:
+        """
+        Map generic data types to MySQL-specific types.
+        
+        Args:
+            data_type: Generic data type string
+            
+        Returns:
+            str: MySQL-specific data type
+        """
+        # Normalize input
+        data_type = str(data_type).lower().strip()
+        
+        # MySQL type mappings
+        type_mappings = {
+            # String types
+            'string': 'TEXT',
+            'str': 'TEXT',
+            'text': 'TEXT',
+            'varchar': 'VARCHAR(255)',
+            'char': 'CHAR(1)',
+            
+            # Numeric types
+            'int': 'INT',
+            'integer': 'INT',
+            'bigint': 'BIGINT',
+            'smallint': 'SMALLINT',
+            'tinyint': 'TINYINT',
+            'mediumint': 'MEDIUMINT',
+            'float': 'FLOAT',
+            'double': 'DOUBLE',
+            'decimal': 'DECIMAL(10,2)',
+            'numeric': 'DECIMAL(10,2)',
+            
+            # Boolean type
+            'bool': 'BOOLEAN',
+            'boolean': 'BOOLEAN',
+            
+            # Date/time types
+            'date': 'DATE',
+            'time': 'TIME',
+            'datetime': 'DATETIME',
+            'timestamp': 'TIMESTAMP',
+            'year': 'YEAR',
+            
+            # JSON type
+            'json': 'JSON',
+            
+            # Binary types
+            'binary': 'BLOB',
+            'blob': 'BLOB',
+            'longblob': 'LONGBLOB',
+            'mediumblob': 'MEDIUMBLOB',
+            'tinyblob': 'TINYBLOB',
+            
+            # Text types
+            'longtext': 'LONGTEXT',
+            'mediumtext': 'MEDIUMTEXT',
+            'tinytext': 'TINYTEXT',
+        }
+        
+        # Handle parameterized types (e.g., VARCHAR(255))
+        if '(' in data_type:
+            base_type = data_type.split('(')[0]
+            if base_type in type_mappings:
+                # For parameterized types, preserve the parameters
+                return data_type.upper()
+        
+        # Return mapped type or original if not found
+        return type_mappings.get(data_type, data_type.upper())
+    
+    def _format_default_value(self, default_value: Any, data_type: str) -> str:
+        """
+        Format default value for MySQL DDL.
+        
+        Args:
+            default_value: The default value
+            data_type: The column data type
+            
+        Returns:
+            str: Formatted default value for DDL
+        """
+        if default_value is None:
+            return "NULL"
+        
+        data_type = str(data_type).lower()
+        
+        # Handle string/text types
+        if data_type in ['string', 'str', 'text', 'varchar', 'char', 'tinytext', 'mediumtext', 'longtext']:
+            # Escape single quotes and wrap in quotes
+            escaped_value = str(default_value).replace("'", "''")
+            return f"'{escaped_value}'"
+        
+        # Handle boolean types
+        if data_type in ['bool', 'boolean']:
+            return '1' if default_value else '0'
+        
+        # Handle numeric types
+        if data_type in ['int', 'integer', 'bigint', 'smallint', 'tinyint', 'mediumint', 
+                        'float', 'double', 'decimal', 'numeric']:
+            return str(default_value)
+        
+        # Handle date/time types
+        if data_type in ['date', 'time', 'datetime', 'timestamp', 'year']:
+            if str(default_value).upper() in ['NOW()', 'CURRENT_TIMESTAMP', 'CURRENT_DATE', 'CURRENT_TIME']:
+                return str(default_value).upper()
+            else:
+                return f"'{default_value}'"
+        
+        # Handle JSON type
+        if data_type == 'json':
+            if isinstance(default_value, (dict, list)):
+                import json
+                return f"'{json.dumps(default_value)}'"
+            else:
+                return f"'{default_value}'"
+        
+        # Default: treat as string
+        return f"'{default_value}'"
+    
+    def create_table(self, table_name: str, schema: List[Dict[str, Any]], 
+                     schema_name: str = None, if_not_exists: bool = True,
+                     drop_if_exists: bool = False, engine: str = 'InnoDB',
+                     charset: str = 'utf8mb4') -> bool:
+        """
+        Create a table in the MySQL database based on a schema definition.
+        
+        Args:
+            table_name: Name of the table to create
+            schema: List of column definitions
+            schema_name: Schema name to create table in (optional)
+            if_not_exists: Whether to use IF NOT EXISTS clause (ignored if drop_if_exists=True)
+            drop_if_exists: Whether to drop the table if it already exists
+            engine: MySQL storage engine (default: InnoDB)
+            charset: Character set for the table (default: utf8mb4)
+            
+        Returns:
+            bool: True if table was created successfully, False otherwise
+            
+        Raises:
+            MySQLQueryError: If table creation fails
+            ValueError: If schema is invalid
+        """
+        try:
+            full_table_name = f"`{schema_name}`.`{table_name}`" if schema_name else f"`{table_name}`"
+            
+            # Check if table exists
+            table_exists = self.table_exists(table_name, schema_name)
+            
+            if table_exists:
+                if drop_if_exists:
+                    self.logger.info(f"Dropping existing table {full_table_name}")
+                    drop_ddl = f"DROP TABLE {full_table_name}"
+                    self.execute_query(drop_ddl)
+                elif not if_not_exists:
+                    raise MySQLQueryError(f"Table {full_table_name} already exists")
+                else:
+                    self.logger.info(f"Table {full_table_name} already exists, skipping creation")
+                    return True
+            
+            # Generate DDL
+            use_if_not_exists = if_not_exists and not drop_if_exists
+            ddl = self.schema_to_ddl(table_name, schema, schema_name, use_if_not_exists, engine, charset)
+            
+            # Execute DDL
+            self.logger.info(f"Creating table {full_table_name}")
+            self.execute_query(ddl)
+            
+            # Verify table was created
+            if self.table_exists(table_name, schema_name):
+                self.logger.info(f"Successfully created table {full_table_name}")
+                return True
+            else:
+                raise MySQLQueryError(f"Table {full_table_name} was not created")
+            
+        except Exception as e:
+            error_msg = f"Failed to create table {table_name}: {str(e)}"
+            self.logger.error(error_msg)
+            raise MySQLQueryError(error_msg)
+    
+    def drop_table(self, table_name: str, schema_name: str = None, 
+                   if_exists: bool = True, cascade: bool = False) -> bool:
+        """
+        Drop a table from the MySQL database.
+        
+        Args:
+            table_name: Name of the table to drop
+            schema_name: Schema name (optional)
+            if_exists: Whether to use IF EXISTS clause
+            cascade: Whether to use CASCADE option (Note: MySQL doesn't support CASCADE for DROP TABLE)
+            
+        Returns:
+            bool: True if table was dropped successfully, False otherwise
+            
+        Raises:
+            MySQLQueryError: If table drop fails
+        """
+        try:
+            full_table_name = f"`{schema_name}`.`{table_name}`" if schema_name else f"`{table_name}`"
+            
+            # Build DROP statement
+            drop_parts = ["DROP TABLE"]
+            
+            if if_exists:
+                drop_parts.append("IF EXISTS")
+            
+            drop_parts.append(full_table_name)
+            
+            # Note: MySQL doesn't support CASCADE for DROP TABLE like PostgreSQL
+            if cascade:
+                self.logger.warning("CASCADE option is not supported for DROP TABLE in MySQL")
+            
+            drop_ddl = " ".join(drop_parts)
+            
+            self.logger.info(f"Dropping table {full_table_name}")
+            self.execute_query(drop_ddl)
+            
+            self.logger.info(f"Successfully dropped table {full_table_name}")
+            return True
+            
+        except Exception as e:
+            error_msg = f"Failed to drop table {table_name}: {str(e)}"
+            self.logger.error(error_msg)
+            raise MySQLQueryError(error_msg)
+    
+    def get_table_info(self, table_name: str, schema_name: str = None) -> Dict[str, Any]:
+        """
+        Get detailed information about a MySQL table.
+        
+        Args:
+            table_name: Name of the table
+            schema_name: Schema name (database name, defaults to current database)
+            
+        Returns:
+            Dict containing table information including engine, charset, etc.
+            
+        Raises:
+            MySQLQueryError: If table info retrieval fails
+        """
+        try:
+            query = """
+                SELECT 
+                    TABLE_NAME as table_name,
+                    ENGINE as engine,
+                    TABLE_COLLATION as collation,
+                    TABLE_ROWS as estimated_rows,
+                    DATA_LENGTH as data_length,
+                    INDEX_LENGTH as index_length,
+                    AUTO_INCREMENT as auto_increment,
+                    CREATE_TIME as create_time,
+                    UPDATE_TIME as update_time,
+                    TABLE_COMMENT as comment
+                FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_NAME = %s
+            """
+            params = [table_name]
+            
+            if schema_name:
+                query += " AND TABLE_SCHEMA = %s"
+                params.append(schema_name)
+            else:
+                query += " AND TABLE_SCHEMA = DATABASE()"
+            
+            result = self.execute_query(query, params)
+            
+            if result:
+                info = result[0]
+                # Convert bytes to human-readable format
+                if info['data_length']:
+                    info['data_size_mb'] = round(info['data_length'] / (1024 * 1024), 2)
+                if info['index_length']:
+                    info['index_size_mb'] = round(info['index_length'] / (1024 * 1024), 2)
+                
+                self.logger.debug(f"Table info for {table_name}: {info}")
+                return info
+            else:
+                raise MySQLQueryError(f"Table {table_name} not found")
+            
+        except Exception as e:
+            error_msg = f"Failed to get table info for {table_name}: {str(e)}"
+            self.logger.error(error_msg)
+            raise MySQLQueryError(error_msg)
