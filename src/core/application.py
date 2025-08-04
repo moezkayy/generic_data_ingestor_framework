@@ -1,6 +1,7 @@
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import time
+import json
 
 from handlers.logging_handler import LoggingHandler
 from handlers.error_handler import ErrorHandler
@@ -9,6 +10,8 @@ from scanners.file_scanner import FileScanner
 from processors.schema_processor import SchemaProcessor
 from processors.json_processor import JSONProcessor
 from utils.report_generator import ReportGenerator
+from connectors.connector_factory import get_connector_factory, DatabaseConnectorFactory
+from connectors.connection_pool_manager import get_pool_manager, shutdown_pool_manager
 
 
 
@@ -19,6 +22,7 @@ class DataIngestionApplication:
         self.error_handler = ErrorHandler()
         self.file_handler = FileHandler()
         self.report_generator = ReportGenerator()
+        self.connector_factory = get_connector_factory()
 
         self.logger = None
         self.scanner = None
@@ -97,6 +101,13 @@ class DataIngestionApplication:
             # Cleanup logging
             if self.logging_handler:
                 self.logging_handler.close_logging()
+            
+            # Cleanup database connections
+            try:
+                shutdown_pool_manager()
+            except Exception as e:
+                if self.logger:
+                    self.logger.warning(f"Error during database cleanup: {str(e)}")
 
     def _initialize_processors(self):
         self.schema_processor = SchemaProcessor()
@@ -213,3 +224,342 @@ class DataIngestionApplication:
                 record_count=total_records,
                 additional_metrics={'files_processed': total_files}
             )
+    
+    def load_to_database(self, data: List[Dict[str, Any]], table_name: str,
+                        db_config: Optional[Dict[str, Any]] = None,
+                        db_config_file: Optional[str] = None,
+                        database_url: Optional[str] = None,
+                        strategy: str = 'append',
+                        create_table: bool = True,
+                        batch_size: int = 1000,
+                        pool_name: str = None) -> Dict[str, Any]:
+        """
+        Load processed data to a database using the specified strategy.
+        
+        Args:
+            data: List of dictionaries containing the data to load
+            table_name: Name of the target table
+            db_config: Database configuration dictionary
+            db_config_file: Path to database configuration file
+            database_url: Database connection URL
+            strategy: Data loading strategy ('append', 'replace', 'upsert')
+            create_table: Whether to create table if it doesn't exist
+            batch_size: Number of rows to process per batch
+            pool_name: Name for connection pool (auto-generated if None)
+            
+        Returns:
+            Dict containing load operation results and statistics
+            
+        Raises:
+            ValueError: If invalid parameters or configuration
+            Exception: If database operation fails
+        """
+        if not data:
+            raise ValueError("Data cannot be empty")
+        
+        if not table_name or not table_name.strip():
+            raise ValueError("Table name cannot be empty")
+        
+        if strategy not in ['append', 'replace', 'upsert']:
+            raise ValueError(f"Invalid strategy: {strategy}. Must be 'append', 'replace', or 'upsert'")
+        
+        # Validate configuration sources
+        config_sources = [db_config, db_config_file, database_url]
+        provided_sources = [src for src in config_sources if src is not None]
+        
+        if len(provided_sources) != 1:
+            raise ValueError("Exactly one of db_config, db_config_file, or database_url must be provided")
+        
+        start_time = time.time()
+        
+        try:
+            self.logger.info(f"🗄️  Starting database load operation")
+            self.logger.info(f"📊 Loading {len(data)} records to table '{table_name}' using '{strategy}' strategy")
+            
+            # Create database connector
+            connector = self._create_database_connector(
+                db_config, db_config_file, database_url, pool_name
+            )
+            
+            # Get connection info for logging
+            conn_info = connector.get_connection_info()
+            self.logger.info(f"🔗 Connected to {conn_info.get('db_type', 'database')}: {conn_info.get('database', 'N/A')}")
+            
+            # Create table if requested and doesn't exist
+            if create_table:
+                self._ensure_table_exists(connector, table_name, data)
+            
+            # Execute loading strategy
+            load_result = self._execute_load_strategy(
+                connector, table_name, data, strategy, batch_size
+            )
+            
+            execution_time = time.time() - start_time
+            
+            # Prepare result summary
+            result = {
+                'success': True,
+                'table_name': table_name,
+                'strategy': strategy,
+                'records_processed': len(data),
+                'records_loaded': load_result.get('rows_processed', load_result.get('rows_inserted', 0)),
+                'execution_time_seconds': round(execution_time, 2),
+                'database_type': conn_info.get('db_type'),
+                'database_name': conn_info.get('database'),
+                'batch_size': batch_size,
+                'operation_details': load_result
+            }
+            
+            self.logger.info(f"✅ Database load completed successfully in {execution_time:.2f}s")
+            self.logger.info(f"📈 Loaded {result['records_loaded']} records to {result['database_type']} table '{table_name}'")
+            
+            return result
+            
+        except Exception as e:
+            execution_time = time.time() - start_time
+            error_msg = f"Database load operation failed: {str(e)}"
+            self.logger.error(f"❌ {error_msg}")
+            
+            result = {
+                'success': False,
+                'table_name': table_name,
+                'strategy': strategy,
+                'records_processed': len(data),
+                'records_loaded': 0,
+                'execution_time_seconds': round(execution_time, 2),
+                'error': error_msg,
+                'operation_details': {}
+            }
+            
+            # Let the application decide whether to raise or return error result
+            raise Exception(error_msg)
+    
+    def _create_database_connector(self, db_config: Optional[Dict[str, Any]],
+                                  db_config_file: Optional[str],
+                                  database_url: Optional[str],
+                                  pool_name: Optional[str]):
+        """Create database connector based on provided configuration."""
+        try:
+            if db_config:
+                # Extract database type and connection parameters
+                if 'db_type' not in db_config:
+                    raise ValueError("Database configuration must include 'db_type'")
+                
+                db_type = db_config.pop('db_type')
+                return self.connector_factory.create_connector(
+                    db_type=db_type,
+                    connection_params=db_config,
+                    pool_name=pool_name,
+                    use_pooling=True
+                )
+            
+            elif db_config_file:
+                return self.connector_factory.create_from_config_file(
+                    config_file_path=db_config_file,
+                    pool_name=pool_name,
+                    use_pooling=True
+                )
+            
+            elif database_url:
+                return self.connector_factory.create_from_url(
+                    database_url=database_url,
+                    pool_name=pool_name,
+                    use_pooling=True
+                )
+            
+        except Exception as e:
+            raise Exception(f"Failed to create database connector: {str(e)}")
+    
+    def _ensure_table_exists(self, connector, table_name: str, data: List[Dict[str, Any]]):
+        """Ensure the target table exists, creating it if necessary."""
+        try:
+            # Check if table exists
+            if connector.table_exists(table_name):
+                self.logger.debug(f"Table '{table_name}' already exists")
+                return
+            
+            # Generate schema from data
+            schema = self._infer_schema_from_data(data)
+            
+            # Create table
+            self.logger.info(f"📋 Creating table '{table_name}' with {len(schema)} columns")
+            success = connector.create_table(table_name, schema)
+            
+            if success:
+                self.logger.info(f"✅ Table '{table_name}' created successfully")
+            else:
+                raise Exception(f"Failed to create table '{table_name}'")
+                
+        except Exception as e:
+            raise Exception(f"Failed to ensure table exists: {str(e)}")
+    
+    def _infer_schema_from_data(self, data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Infer database schema from data sample."""
+        if not data:
+            raise ValueError("Cannot infer schema from empty data")
+        
+        # Analyze first few records to infer types
+        sample_size = min(100, len(data))
+        sample_data = data[:sample_size]
+        
+        # Collect all unique column names
+        all_columns = set()
+        for record in sample_data:
+            if isinstance(record, dict):
+                all_columns.update(record.keys())
+        
+        schema = []
+        
+        for column_name in sorted(all_columns):
+            # Analyze column values to infer type
+            values = []
+            for record in sample_data:
+                if isinstance(record, dict) and column_name in record:
+                    values.append(record[column_name])
+            
+            # Infer data type
+            inferred_type = self._infer_column_type(values)
+            
+            column_def = {
+                'name': column_name,
+                'type': inferred_type,
+                'nullable': True  # Default to nullable for flexibility
+            }
+            
+            schema.append(column_def)
+        
+        return schema
+    
+    def _infer_column_type(self, values: List[Any]) -> str:
+        """Infer data type from column values."""
+        non_null_values = [v for v in values if v is not None]
+        
+        if not non_null_values:
+            return 'text'  # Default for all-null columns
+        
+        # Check for integer
+        if all(isinstance(v, int) and not isinstance(v, bool) for v in non_null_values):
+            return 'integer'
+        
+        # Check for float
+        if all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in non_null_values):
+            return 'float'
+        
+        # Check for boolean
+        if all(isinstance(v, bool) for v in non_null_values):
+            return 'boolean'
+        
+        # Check for JSON objects/arrays
+        if any(isinstance(v, (dict, list)) for v in non_null_values):
+            return 'json'
+        
+        # Default to text
+        return 'text'
+    
+    def _execute_load_strategy(self, connector, table_name: str, data: List[Dict[str, Any]],
+                              strategy: str, batch_size: int) -> Dict[str, Any]:
+        """Execute the specified data loading strategy."""
+        try:
+            if strategy == 'append':
+                # Use insert_data method if available, otherwise fall back to basic insert
+                if hasattr(connector, 'insert_data'):
+                    return {'rows_inserted': connector.insert_data(table_name, data, batch_size=batch_size)}
+                else:
+                    # Basic batch insert using execute_batch
+                    return self._basic_batch_insert(connector, table_name, data, batch_size)
+            
+            elif strategy == 'replace':
+                # Use replace_data method if available
+                if hasattr(connector, 'replace_data'):
+                    return connector.replace_data(table_name, data, batch_size=batch_size)
+                else:
+                    # Fallback: truncate and insert
+                    return self._truncate_and_insert(connector, table_name, data, batch_size)
+            
+            elif strategy == 'upsert':
+                # Use upsert_data_optimized method if available
+                if hasattr(connector, 'upsert_data_optimized'):
+                    return connector.upsert_data_optimized(table_name, data, batch_size=batch_size)
+                elif hasattr(connector, 'upsert_data'):
+                    # Try to detect conflict columns automatically
+                    conflict_columns = self._detect_primary_key_columns(connector, table_name)
+                    return {'rows_processed': connector.upsert_data(table_name, data, conflict_columns, batch_size=batch_size)}
+                else:
+                    # Fallback to append strategy
+                    self.logger.warning(f"Upsert not supported for this database type, falling back to append")
+                    return self._basic_batch_insert(connector, table_name, data, batch_size)
+            
+        except Exception as e:
+            raise Exception(f"Failed to execute {strategy} strategy: {str(e)}")
+    
+    def _basic_batch_insert(self, connector, table_name: str, data: List[Dict[str, Any]], 
+                           batch_size: int) -> Dict[str, Any]:
+        """Basic batch insert using execute_batch method."""
+        if not data:
+            return {'rows_inserted': 0}
+        
+        # Get column names from first record
+        columns = list(data[0].keys())
+        column_list = ', '.join(f'"{col}"' for col in columns)
+        placeholders = ', '.join(['%s'] * len(columns))
+        
+        insert_query = f'INSERT INTO "{table_name}" ({column_list}) VALUES ({placeholders})'
+        
+        # Prepare batch parameters
+        batch_params = []
+        for record in data:
+            row_params = [record.get(col) for col in columns]
+            batch_params.append(row_params)
+        
+        # Execute in batches
+        total_inserted = 0
+        for i in range(0, len(batch_params), batch_size):
+            batch = batch_params[i:i + batch_size]
+            rows_affected = connector.execute_batch(insert_query, batch)
+            total_inserted += rows_affected
+        
+        return {'rows_inserted': total_inserted}
+    
+    def _truncate_and_insert(self, connector, table_name: str, data: List[Dict[str, Any]], 
+                           batch_size: int) -> Dict[str, Any]:
+        """Truncate table and insert new data."""
+        # Truncate table if method exists
+        if hasattr(connector, 'truncate_table'):
+            connector.truncate_table(table_name)
+        else:
+            # Fallback: delete all records
+            connector.execute_query(f'DELETE FROM "{table_name}"')
+        
+        # Insert new data
+        result = self._basic_batch_insert(connector, table_name, data, batch_size)
+        return {
+            'operation': 'replace',
+            'rows_inserted': result['rows_inserted'],
+            'rows_processed': result['rows_inserted']
+        }
+    
+    def _detect_primary_key_columns(self, connector, table_name: str) -> List[str]:
+        """Detect primary key columns for upsert operations."""
+        try:
+            if hasattr(connector, 'get_primary_key_columns'):
+                pk_columns = connector.get_primary_key_columns(table_name)
+                if pk_columns:
+                    return pk_columns
+            
+            # Fallback: look for common primary key column names
+            schema = connector.get_table_schema(table_name)
+            common_pk_names = ['id', 'pk', 'primary_key', 'key']
+            
+            for column in schema:
+                col_name = column.get('column_name', '').lower()
+                if col_name in common_pk_names:
+                    return [column['column_name']]
+            
+            # Last resort: use first column
+            if schema:
+                return [schema[0]['column_name']]
+            
+            return []
+            
+        except Exception:
+            return []
