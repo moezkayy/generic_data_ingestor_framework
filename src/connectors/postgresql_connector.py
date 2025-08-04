@@ -873,3 +873,463 @@ class PostgreSQLConnector(DatabaseConnector):
             error_msg = f"Failed to drop table {table_name}: {str(e)}"
             self.logger.error(error_msg)
             raise PostgreSQLQueryError(error_msg)
+    
+    def insert_data(self, table_name: str, data: List[Dict[str, Any]], 
+                    schema_name: str = None, batch_size: int = 1000,
+                    on_conflict: str = 'error') -> int:
+        """
+        Insert data into a PostgreSQL table using batch operations.
+        
+        Args:
+            table_name: Name of the target table
+            data: List of dictionaries containing the data to insert
+            schema_name: Schema name (optional)
+            batch_size: Number of rows to insert per batch
+            on_conflict: How to handle conflicts ('error', 'ignore', 'update')
+            
+        Returns:
+            int: Number of rows successfully inserted
+            
+        Raises:
+            PostgreSQLQueryError: If data insertion fails
+            ValueError: If data is invalid or empty
+        """
+        if not data:
+            raise ValueError("Data cannot be empty")
+        
+        if not isinstance(data, list):
+            raise ValueError("Data must be a list of dictionaries")
+        
+        if batch_size <= 0:
+            raise ValueError("Batch size must be positive")
+        
+        if on_conflict not in ['error', 'ignore', 'update']:
+            raise ValueError("on_conflict must be 'error', 'ignore', or 'update'")
+        
+        try:
+            full_table_name = f'"{schema_name}"."{table_name}"' if schema_name else f'"{table_name}"'
+            
+            # Validate table exists
+            if not self.table_exists(table_name, schema_name):
+                raise PostgreSQLQueryError(f"Table {full_table_name} does not exist")
+            
+            # Get table schema for validation
+            table_schema = self.get_table_schema(table_name, schema_name)
+            column_info = {col['column_name']: col for col in table_schema}
+            
+            # Validate and preprocess data
+            processed_data = self._preprocess_data(data, column_info)
+            
+            total_inserted = 0
+            total_batches = (len(processed_data) + batch_size - 1) // batch_size
+            
+            self.logger.info(f"Inserting {len(processed_data)} rows into {full_table_name} in {total_batches} batches")
+            
+            # Process data in batches
+            for batch_num in range(total_batches):
+                start_idx = batch_num * batch_size
+                end_idx = min(start_idx + batch_size, len(processed_data))
+                batch_data = processed_data[start_idx:end_idx]
+                
+                try:
+                    rows_inserted = self._insert_batch(
+                        full_table_name, batch_data, column_info, on_conflict
+                    )
+                    total_inserted += rows_inserted
+                    
+                    self.logger.debug(f"Batch {batch_num + 1}/{total_batches}: inserted {rows_inserted} rows")
+                    
+                except Exception as e:
+                    if on_conflict == 'error':
+                        self.logger.error(f"Batch {batch_num + 1} failed: {str(e)}")
+                        raise
+                    else:
+                        self.logger.warning(f"Batch {batch_num + 1} failed, continuing: {str(e)}")
+                        continue
+            
+            self.logger.info(f"Successfully inserted {total_inserted} rows into {full_table_name}")
+            return total_inserted
+            
+        except Exception as e:
+            error_msg = f"Failed to insert data into {table_name}: {str(e)}"
+            self.logger.error(error_msg)
+            raise PostgreSQLQueryError(error_msg)
+    
+    def _preprocess_data(self, data: List[Dict[str, Any]], 
+                        column_info: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Preprocess and validate data before insertion.
+        
+        Args:
+            data: List of data dictionaries
+            column_info: Column information from table schema
+            
+        Returns:
+            List of preprocessed data dictionaries
+            
+        Raises:
+            ValueError: If data validation fails
+        """
+        processed_data = []
+        
+        for row_idx, row in enumerate(data):
+            if not isinstance(row, dict):
+                raise ValueError(f"Row {row_idx} must be a dictionary")
+            
+            processed_row = {}
+            
+            # Process each column in the row
+            for col_name, col_value in row.items():
+                if col_name not in column_info:
+                    self.logger.warning(f"Column '{col_name}' not found in table schema, skipping")
+                    continue
+                
+                col_def = column_info[col_name]
+                
+                try:
+                    # Validate and convert data type
+                    processed_value = self._validate_and_convert_value(
+                        col_value, col_def, col_name, row_idx
+                    )
+                    processed_row[col_name] = processed_value
+                    
+                except Exception as e:
+                    error_msg = f"Data validation failed for row {row_idx}, column '{col_name}': {str(e)}"
+                    self.logger.error(error_msg)
+                    raise ValueError(error_msg)
+            
+            # Check for required columns
+            for col_name, col_def in column_info.items():
+                if (col_def['is_nullable'] == 'NO' and 
+                    col_def['column_default'] is None and 
+                    col_name not in processed_row):
+                    raise ValueError(f"Required column '{col_name}' missing in row {row_idx}")
+            
+            processed_data.append(processed_row)
+        
+        return processed_data
+    
+    def _validate_and_convert_value(self, value: Any, column_def: Dict[str, Any], 
+                                   col_name: str, row_idx: int) -> Any:
+        """
+        Validate and convert a value according to column definition.
+        
+        Args:
+            value: The value to validate and convert
+            column_def: Column definition from table schema
+            col_name: Column name for error reporting
+            row_idx: Row index for error reporting
+            
+        Returns:
+            Converted and validated value
+            
+        Raises:
+            ValueError: If validation fails
+        """
+        # Handle NULL values
+        if value is None:
+            if column_def['is_nullable'] == 'NO' and column_def['column_default'] is None:
+                raise ValueError(f"NULL value not allowed for non-nullable column '{col_name}'")
+            return None
+        
+        data_type = column_def['data_type'].lower()
+        
+        try:
+            # String types
+            if data_type in ['text', 'character varying', 'varchar', 'character', 'char']:
+                converted_value = str(value)
+                max_length = column_def.get('character_maximum_length')
+                if max_length and len(converted_value) > max_length:
+                    raise ValueError(f"String too long (max {max_length} characters)")
+                return converted_value
+            
+            # Integer types
+            elif data_type in ['integer', 'bigint', 'smallint']:
+                if isinstance(value, bool):
+                    raise ValueError("Boolean cannot be converted to integer")
+                return int(value)
+            
+            # Numeric types
+            elif data_type in ['numeric', 'decimal']:
+                return float(value)
+            
+            # Float types
+            elif data_type in ['real', 'double precision']:
+                return float(value)
+            
+            # Boolean type
+            elif data_type == 'boolean':
+                if isinstance(value, str):
+                    if value.lower() in ['true', 't', '1', 'yes', 'y', 'on']:
+                        return True
+                    elif value.lower() in ['false', 'f', '0', 'no', 'n', 'off']:
+                        return False
+                    else:
+                        raise ValueError(f"Invalid boolean value: {value}")
+                return bool(value)
+            
+            # Date and time types
+            elif data_type in ['date', 'timestamp', 'timestamp without time zone', 
+                             'timestamp with time zone', 'time', 'time without time zone']:
+                if isinstance(value, str):
+                    # Let PostgreSQL handle date/time parsing
+                    return value
+                else:
+                    return str(value)
+            
+            # JSON types
+            elif data_type in ['json', 'jsonb']:
+                if isinstance(value, (dict, list)):
+                    import json
+                    return json.dumps(value)
+                elif isinstance(value, str):
+                    # Validate JSON string
+                    import json
+                    json.loads(value)  # This will raise exception if invalid
+                    return value
+                else:
+                    raise ValueError(f"Invalid JSON value type: {type(value)}")
+            
+            # UUID type
+            elif data_type == 'uuid':
+                import uuid
+                if isinstance(value, str):
+                    # Validate UUID format
+                    uuid.UUID(value)
+                    return value
+                else:
+                    return str(value)
+            
+            # Array types
+            elif data_type.endswith('[]'):
+                if not isinstance(value, list):
+                    raise ValueError(f"Array column requires list value")
+                return value
+            
+            # Binary types
+            elif data_type == 'bytea':
+                if isinstance(value, bytes):
+                    return value
+                elif isinstance(value, str):
+                    return value.encode('utf-8')
+                else:
+                    raise ValueError(f"Invalid binary value type: {type(value)}")
+            
+            # Default: return as string
+            else:
+                return str(value)
+                
+        except (ValueError, TypeError) as e:
+            raise ValueError(f"Cannot convert value '{value}' to {data_type}: {str(e)}")
+    
+    def _insert_batch(self, table_name: str, batch_data: List[Dict[str, Any]], 
+                     column_info: Dict[str, Dict[str, Any]], on_conflict: str) -> int:
+        """
+        Insert a batch of data into the table.
+        
+        Args:
+            table_name: Full table name (with schema if applicable)
+            batch_data: List of data dictionaries for this batch
+            column_info: Column information from table schema
+            on_conflict: How to handle conflicts
+            
+        Returns:
+            int: Number of rows inserted
+            
+        Raises:
+            PostgreSQLQueryError: If batch insertion fails
+        """
+        if not batch_data:
+            return 0
+        
+        try:
+            # Get all unique column names from the batch
+            all_columns = set()
+            for row in batch_data:
+                all_columns.update(row.keys())
+            
+            # Sort columns for consistent ordering
+            columns = sorted(all_columns)
+            
+            # Build INSERT statement
+            column_list = ', '.join(f'"{col}"' for col in columns)
+            placeholders = ', '.join(['%s'] * len(columns))
+            
+            base_query = f"INSERT INTO {table_name} ({column_list}) VALUES ({placeholders})"
+            
+            # Add conflict handling
+            if on_conflict == 'ignore':
+                query = f"{base_query} ON CONFLICT DO NOTHING"
+            elif on_conflict == 'update':
+                # Simple UPDATE SET strategy - update all non-key columns
+                update_columns = [col for col in columns if not column_info[col].get('is_primary_key', False)]
+                if update_columns:
+                    update_set = ', '.join(f'"{col}" = EXCLUDED."{col}"' for col in update_columns)
+                    query = f"{base_query} ON CONFLICT DO UPDATE SET {update_set}"
+                else:
+                    query = f"{base_query} ON CONFLICT DO NOTHING"
+            else:
+                query = base_query
+            
+            # Prepare batch parameters
+            batch_params = []
+            for row in batch_data:
+                row_params = []
+                for col in columns:
+                    row_params.append(row.get(col))
+                batch_params.append(row_params)
+            
+            # Execute batch insert
+            with self._get_connection() as connection:
+                with connection.cursor() as cursor:
+                    psycopg2.extras.execute_batch(cursor, query, batch_params)
+                    rows_affected = cursor.rowcount
+                    connection.commit()
+                    
+                    return rows_affected
+                    
+        except Exception as e:
+            error_msg = f"Batch insertion failed: {str(e)}"
+            self.logger.error(error_msg)
+            raise PostgreSQLQueryError(error_msg)
+    
+    def upsert_data(self, table_name: str, data: List[Dict[str, Any]], 
+                    conflict_columns: List[str], schema_name: str = None,
+                    batch_size: int = 1000) -> int:
+        """
+        Insert or update data using PostgreSQL's ON CONFLICT functionality.
+        
+        Args:
+            table_name: Name of the target table
+            data: List of dictionaries containing the data to upsert
+            conflict_columns: List of column names that define uniqueness
+            schema_name: Schema name (optional)
+            batch_size: Number of rows to process per batch
+            
+        Returns:
+            int: Number of rows processed (inserted or updated)
+            
+        Raises:
+            PostgreSQLQueryError: If upsert operation fails
+            ValueError: If parameters are invalid
+        """
+        if not data:
+            raise ValueError("Data cannot be empty")
+        
+        if not conflict_columns:
+            raise ValueError("Conflict columns must be specified")
+        
+        try:
+            full_table_name = f'"{schema_name}"."{table_name}"' if schema_name else f'"{table_name}"'
+            
+            # Validate table exists
+            if not self.table_exists(table_name, schema_name):
+                raise PostgreSQLQueryError(f"Table {full_table_name} does not exist")
+            
+            # Get table schema
+            table_schema = self.get_table_schema(table_name, schema_name)
+            column_info = {col['column_name']: col for col in table_schema}
+            
+            # Validate conflict columns exist
+            for col in conflict_columns:
+                if col not in column_info:
+                    raise ValueError(f"Conflict column '{col}' does not exist in table")
+            
+            # Preprocess data
+            processed_data = self._preprocess_data(data, column_info)
+            
+            total_processed = 0
+            total_batches = (len(processed_data) + batch_size - 1) // batch_size
+            
+            self.logger.info(f"Upserting {len(processed_data)} rows into {full_table_name}")
+            
+            # Process in batches
+            for batch_num in range(total_batches):
+                start_idx = batch_num * batch_size
+                end_idx = min(start_idx + batch_size, len(processed_data))
+                batch_data = processed_data[start_idx:end_idx]
+                
+                rows_processed = self._upsert_batch(
+                    full_table_name, batch_data, conflict_columns, column_info
+                )
+                total_processed += rows_processed
+                
+                self.logger.debug(f"Batch {batch_num + 1}/{total_batches}: processed {rows_processed} rows")
+            
+            self.logger.info(f"Successfully processed {total_processed} rows in {full_table_name}")
+            return total_processed
+            
+        except Exception as e:
+            error_msg = f"Failed to upsert data into {table_name}: {str(e)}"
+            self.logger.error(error_msg)
+            raise PostgreSQLQueryError(error_msg)
+    
+    def _upsert_batch(self, table_name: str, batch_data: List[Dict[str, Any]], 
+                     conflict_columns: List[str], 
+                     column_info: Dict[str, Dict[str, Any]]) -> int:
+        """
+        Perform upsert operation on a batch of data.
+        
+        Args:
+            table_name: Full table name
+            batch_data: Batch of data to upsert
+            conflict_columns: Columns that define uniqueness
+            column_info: Column information from table schema
+            
+        Returns:
+            int: Number of rows processed
+        """
+        if not batch_data:
+            return 0
+        
+        try:
+            # Get all columns from batch
+            all_columns = set()
+            for row in batch_data:
+                all_columns.update(row.keys())
+            
+            columns = sorted(all_columns)
+            
+            # Build upsert query
+            column_list = ', '.join(f'"{col}"' for col in columns)
+            placeholders = ', '.join(['%s'] * len(columns))
+            conflict_list = ', '.join(f'"{col}"' for col in conflict_columns)
+            
+            # Update columns (exclude conflict columns from updates)
+            update_columns = [col for col in columns if col not in conflict_columns]
+            update_set = ', '.join(f'"{col}" = EXCLUDED."{col}"' for col in update_columns)
+            
+            if update_set:
+                query = f"""
+                    INSERT INTO {table_name} ({column_list}) 
+                    VALUES ({placeholders})
+                    ON CONFLICT ({conflict_list}) 
+                    DO UPDATE SET {update_set}
+                """
+            else:
+                query = f"""
+                    INSERT INTO {table_name} ({column_list}) 
+                    VALUES ({placeholders})
+                    ON CONFLICT ({conflict_list}) 
+                    DO NOTHING
+                """
+            
+            # Prepare batch parameters
+            batch_params = []
+            for row in batch_data:
+                row_params = [row.get(col) for col in columns]
+                batch_params.append(row_params)
+            
+            # Execute upsert
+            with self._get_connection() as connection:
+                with connection.cursor() as cursor:
+                    psycopg2.extras.execute_batch(cursor, query, batch_params)
+                    rows_affected = cursor.rowcount
+                    connection.commit()
+                    
+                    return rows_affected
+                    
+        except Exception as e:
+            error_msg = f"Batch upsert failed: {str(e)}"
+            self.logger.error(error_msg)
+            raise PostgreSQLQueryError(error_msg)
