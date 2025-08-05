@@ -165,12 +165,12 @@ class SQLiteConnector(DatabaseConnector):
             SQLiteConnectionError: If connection fails
         """
         if self.is_connected and self.connection:
-            self.logger.info("Already connected to SQLite database")
+            self.logger.info("DB_CONNECTION: Already connected to SQLite database")
             return True
         
         try:
             with self.connection_lock:
-                self.logger.info(f"Connecting to SQLite database: {self.db_path}")
+                self.logger.info(f"DB_CONNECTION: Initiating SQLite connection to database: {self.db_path}")
                 
                 # Check if database file exists (except for :memory:)
                 if self.db_path != ':memory:':
@@ -178,19 +178,28 @@ class SQLiteConnector(DatabaseConnector):
                         if not self.connection_params.get('create_if_not_exists', True):
                             raise SQLiteConnectionError(f"Database file does not exist: {self.db_path}")
                         else:
-                            self.logger.info(f"Creating new SQLite database: {self.db_path}")
+                            self.logger.info(f"DB_CONNECTION: Creating new SQLite database: {self.db_path}")
+                    else:
+                        file_size = os.path.getsize(self.db_path)
+                        self.logger.debug(f"DB_CONNECTION: Existing database file size: {file_size} bytes ({file_size / (1024*1024):.2f} MB)")
                 
                 # Create connection
+                timeout = self.connection_params['timeout']
+                check_same_thread = self.connection_params['check_same_thread']
+                
+                self.logger.debug(f"DB_CONNECTION: Connection parameters - timeout: {timeout}s, check_same_thread: {check_same_thread}")
+                
                 self.connection = sqlite3.connect(
                     self.db_path,
-                    timeout=self.connection_params['timeout'],
-                    check_same_thread=self.connection_params['check_same_thread']
+                    timeout=timeout,
+                    check_same_thread=check_same_thread
                 )
                 
                 # Set row factory for dictionary-style results
                 self.connection.row_factory = sqlite3.Row
                 
                 # Apply PRAGMA settings
+                self.logger.debug(f"DB_CONNECTION: Applying PRAGMA settings: {list(self.pragma_settings.keys())}")
                 self._apply_pragma_settings()
                 
                 # Test the connection
@@ -199,16 +208,16 @@ class SQLiteConnector(DatabaseConnector):
                 cursor.fetchone()
                 
                 self.is_connected = True
-                self.logger.info("Successfully connected to SQLite database")
+                self.logger.info(f"DB_CONNECTION: Successfully connected to SQLite database at {self.db_path}")
                 return True
                 
         except SQLiteError as e:
             error_msg = f"Failed to connect to SQLite database: {str(e)}"
-            self.logger.error(error_msg)
+            self.logger.error(f"DB_CONNECTION: {error_msg}")
             raise SQLiteConnectionError(error_msg)
         except Exception as e:
             error_msg = f"Unexpected error during SQLite connection: {str(e)}"
-            self.logger.error(error_msg)
+            self.logger.error(f"DB_CONNECTION: {error_msg}")
             raise SQLiteConnectionError(error_msg)
     
     def _apply_pragma_settings(self) -> None:
@@ -291,7 +300,9 @@ class SQLiteConnector(DatabaseConnector):
             with self._get_connection() as connection:
                 cursor = connection.cursor()
                 
-                self.logger.debug(f"Executing query: {query[:100]}{'...' if len(query) > 100 else ''}")
+                query_preview = query[:100] + ('...' if len(query) > 100 else '')
+                param_count = len(params) if params else 0
+                self.logger.debug(f"DB_QUERY_EXECUTE: Executing {query_type} query with {param_count} parameters: {query_preview}")
                 
                 start_time = time.time()
                 cursor.execute(query, params or [])
@@ -300,38 +311,39 @@ class SQLiteConnector(DatabaseConnector):
                 if query_type in ['SELECT', 'PRAGMA']:
                     # Convert sqlite3.Row objects to dictionaries
                     results = [dict(row) for row in cursor.fetchall()]
-                    self.logger.debug(f"Query executed successfully in {execution_time:.3f}s, returned {len(results)} rows")
+                    result_count = len(results)
+                    self.logger.info(f"DB_QUERY_EXECUTE: {query_type} query completed in {execution_time:.3f}s, returned {result_count} rows")
                     return results
                 else:
                     rowcount = cursor.rowcount
                     if not self.in_transaction:
                         connection.commit()
-                    self.logger.debug(f"Query executed successfully in {execution_time:.3f}s, affected {rowcount} rows")
+                    self.logger.info(f"DB_QUERY_EXECUTE: {query_type} query completed in {execution_time:.3f}s, affected {rowcount} rows")
                     return rowcount
                     
         except ProgrammingError as e:
-            error_msg = f"SQL syntax error: {str(e)}"
-            self.logger.error(error_msg)
+            error_msg = f"SQL syntax error in {query_type} query: {str(e)}"
+            self.logger.error(f"DB_QUERY_EXECUTE: {error_msg}")
             raise SQLiteQueryError(error_msg)
             
         except IntegrityError as e:
-            error_msg = f"Database integrity error: {str(e)}"
-            self.logger.error(error_msg)
+            error_msg = f"Database integrity error in {query_type} query: {str(e)}"
+            self.logger.error(f"DB_QUERY_EXECUTE: {error_msg}")
             raise SQLiteQueryError(error_msg)
             
         except OperationalError as e:
-            error_msg = f"SQLite operational error: {str(e)}"
-            self.logger.error(error_msg)
+            error_msg = f"SQLite operational error in {query_type} query: {str(e)}"
+            self.logger.error(f"DB_QUERY_EXECUTE: {error_msg}")
             raise SQLiteQueryError(error_msg)
             
         except SQLiteError as e:
-            error_msg = f"SQLite error during query execution: {str(e)}"
-            self.logger.error(error_msg)
+            error_msg = f"SQLite error during {query_type} query execution: {str(e)}"
+            self.logger.error(f"DB_QUERY_EXECUTE: {error_msg}")
             raise SQLiteQueryError(error_msg)
             
         except Exception as e:
-            error_msg = f"Unexpected error during query execution: {str(e)}"
-            self.logger.error(error_msg)
+            error_msg = f"Unexpected error during {query_type} query execution: {str(e)}"
+            self.logger.error(f"DB_QUERY_EXECUTE: {error_msg}")
             raise SQLiteQueryError(error_msg)
     
     def begin_transaction(self) -> bool:
@@ -888,18 +900,25 @@ class SQLiteConnector(DatabaseConnector):
             ValueError: If schema is invalid
         """
         try:
+            column_count = len(schema)
+            column_names = [col.get('name', 'unknown') for col in schema]
+            
+            self.logger.info(f"DB_SCHEMA_CREATE: Starting table creation for '{table_name}' with {column_count} columns, drop_if_exists={drop_if_exists}, if_not_exists={if_not_exists}")
+            self.logger.debug(f"DB_SCHEMA_CREATE: Table columns: {column_names}")
+            
             # Check if table exists
             table_exists = self._table_exists_impl(table_name)
             
             if table_exists:
                 if drop_if_exists:
-                    self.logger.info(f"Dropping existing table {table_name}")
+                    self.logger.info(f"DB_SCHEMA_CREATE: Dropping existing table {table_name}")
                     drop_ddl = f'DROP TABLE "{table_name}"'
                     self.execute_query(drop_ddl)
+                    self.logger.info(f"DB_SCHEMA_CREATE: Existing table {table_name} dropped successfully")
                 elif not if_not_exists:
                     raise SQLiteQueryError(f"Table {table_name} already exists")
                 else:
-                    self.logger.info(f"Table {table_name} already exists, skipping creation")
+                    self.logger.info(f"DB_SCHEMA_CREATE: Table {table_name} already exists, skipping creation")
                     return True
             
             # Generate DDL
@@ -907,15 +926,17 @@ class SQLiteConnector(DatabaseConnector):
             ddl = self.schema_to_ddl(table_name, schema, use_if_not_exists)
             
             # Execute DDL
-            self.logger.info(f"Creating table {table_name}")
+            self.logger.info(f"DB_SCHEMA_CREATE: Executing CREATE TABLE DDL for {table_name}")
+            start_time = time.time()
             self.execute_query(ddl)
+            creation_time = time.time() - start_time
             
             # Invalidate cache since table structure may have changed
             self._invalidate_table_cache(table_name, schema_name)
             
             # Verify table was created
             if self._table_exists_impl(table_name):
-                self.logger.info(f"Successfully created table {table_name}")
+                self.logger.info(f"DB_SCHEMA_CREATE: Successfully created table {table_name} in {creation_time:.3f}s")
                 # Cache the fact that table now exists
                 self._cache_table_exists(table_name, True, schema_name)
                 return True
@@ -924,7 +945,7 @@ class SQLiteConnector(DatabaseConnector):
             
         except Exception as e:
             error_msg = f"Failed to create table {table_name}: {str(e)}"
-            self.logger.error(error_msg)
+            self.logger.error(f"DB_SCHEMA_CREATE: {error_msg}")
             raise SQLiteQueryError(error_msg)
     
     def drop_table(self, table_name: str, schema_name: str = None, 

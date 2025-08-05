@@ -158,14 +158,22 @@ class MySQLConnector(DatabaseConnector):
             MySQLConnectionError: If connection fails after all retry attempts
         """
         if self.is_connected and self.connection_pool:
-            self.logger.info("Already connected to MySQL database")
+            self.logger.info("DB_CONNECTION: Already connected to MySQL database")
             return True
+        
+        host = self.connection_params.get('host')
+        port = self.connection_params.get('port')
+        database = self.connection_params.get('database')
+        user = self.connection_params.get('user')
+        pool_size = self.connection_params.get('connection_pool_size')
+        
+        self.logger.info(f"DB_CONNECTION: Initiating MySQL connection to {host}:{port}/{database} as {user} with pool size {pool_size}")
         
         last_error = None
         
         for attempt in range(self.max_retries):
             try:
-                self.logger.info(f"Attempting to connect to MySQL database (attempt {attempt + 1}/{self.max_retries})")
+                self.logger.info(f"DB_CONNECTION: Connection attempt {attempt + 1}/{self.max_retries} to MySQL database")
                 
                 # Create connection pool
                 pool_config = self.connection_config.copy()
@@ -183,23 +191,24 @@ class MySQLConnector(DatabaseConnector):
                 test_conn.close()
                 
                 self.is_connected = True
-                self.logger.info("Successfully connected to MySQL database")
+                self.logger.info(f"DB_CONNECTION: Successfully established MySQL connection pool (size: {pool_size})")
                 return True
                 
             except MySQLError as e:
                 last_error = e
-                self.logger.warning(f"Connection attempt {attempt + 1} failed: {str(e)}")
+                self.logger.warning(f"DB_CONNECTION: Connection attempt {attempt + 1} failed with MySQL error: {str(e)}")
                 
                 if attempt < self.max_retries - 1:
+                    self.logger.debug(f"DB_CONNECTION: Waiting {self.retry_delay}s before retry")
                     time.sleep(self.retry_delay)
                 
             except Exception as e:
                 last_error = e
-                self.logger.error(f"Unexpected error during connection attempt {attempt + 1}: {str(e)}")
+                self.logger.error(f"DB_CONNECTION: Unexpected error during connection attempt {attempt + 1}: {str(e)}")
                 break
         
         error_msg = f"Failed to connect to MySQL database after {self.max_retries} attempts: {str(last_error)}"
-        self.logger.error(error_msg)
+        self.logger.error(f"DB_CONNECTION: {error_msg}")
         raise MySQLConnectionError(error_msg)
     
     def disconnect(self) -> bool:
@@ -299,7 +308,9 @@ class MySQLConnector(DatabaseConnector):
             with self._get_connection() as connection:
                 cursor = connection.cursor(dictionary=True, buffered=True)
                 
-                self.logger.debug(f"Executing query: {query[:100]}{'...' if len(query) > 100 else ''}")
+                query_preview = query[:100] + ('...' if len(query) > 100 else '')
+                param_count = len(params) if params else 0
+                self.logger.debug(f"DB_QUERY_EXECUTE: Executing {query_type} query with {param_count} parameters: {query_preview}")
                 
                 start_time = time.time()
                 cursor.execute(query, params)
@@ -307,32 +318,33 @@ class MySQLConnector(DatabaseConnector):
                 
                 if query_type in ['SELECT', 'SHOW', 'DESCRIBE', 'EXPLAIN']:
                     results = cursor.fetchall()
-                    self.logger.debug(f"Query executed successfully in {execution_time:.3f}s, returned {len(results)} rows")
+                    result_count = len(results)
+                    self.logger.info(f"DB_QUERY_EXECUTE: {query_type} query completed in {execution_time:.3f}s, returned {result_count} rows")
                     return results
                 else:
                     rowcount = cursor.rowcount
                     connection.commit()
-                    self.logger.debug(f"Query executed successfully in {execution_time:.3f}s, affected {rowcount} rows")
+                    self.logger.info(f"DB_QUERY_EXECUTE: {query_type} query completed in {execution_time:.3f}s, affected {rowcount} rows")
                     return rowcount
                     
         except ProgrammingError as e:
-            error_msg = f"SQL syntax error: {str(e)}"
-            self.logger.error(error_msg)
+            error_msg = f"SQL syntax error in {query_type} query: {str(e)}"
+            self.logger.error(f"DB_QUERY_EXECUTE: {error_msg}")
             raise MySQLQueryError(error_msg)
             
         except IntegrityError as e:
-            error_msg = f"Database integrity error: {str(e)}"
-            self.logger.error(error_msg)
+            error_msg = f"Database integrity error in {query_type} query: {str(e)}"
+            self.logger.error(f"DB_QUERY_EXECUTE: {error_msg}")
             raise MySQLQueryError(error_msg)
             
         except MySQLError as e:
-            error_msg = f"MySQL error during query execution: {str(e)}"
-            self.logger.error(error_msg)
+            error_msg = f"MySQL error during {query_type} query execution: {str(e)}"
+            self.logger.error(f"DB_QUERY_EXECUTE: {error_msg}")
             raise MySQLQueryError(error_msg)
             
         except Exception as e:
-            error_msg = f"Unexpected error during query execution: {str(e)}"
-            self.logger.error(error_msg)
+            error_msg = f"Unexpected error during {query_type} query execution: {str(e)}"
+            self.logger.error(f"DB_QUERY_EXECUTE: {error_msg}")
             raise MySQLQueryError(error_msg)
     
     def begin_transaction(self) -> bool:
@@ -863,19 +875,25 @@ class MySQLConnector(DatabaseConnector):
         """
         try:
             full_table_name = f"`{schema_name}`.`{table_name}`" if schema_name else f"`{table_name}`"
+            column_count = len(schema)
+            column_names = [col.get('name', 'unknown') for col in schema]
+            
+            self.logger.info(f"DB_SCHEMA_CREATE: Starting table creation for '{full_table_name}' with {column_count} columns, engine={engine}, charset={charset}")
+            self.logger.debug(f"DB_SCHEMA_CREATE: Table columns: {column_names}")
             
             # Check if table exists
             table_exists = self._table_exists_impl(table_name, schema_name)
             
             if table_exists:
                 if drop_if_exists:
-                    self.logger.info(f"Dropping existing table {full_table_name}")
+                    self.logger.info(f"DB_SCHEMA_CREATE: Dropping existing table {full_table_name}")
                     drop_ddl = f"DROP TABLE {full_table_name}"
                     self.execute_query(drop_ddl)
+                    self.logger.info(f"DB_SCHEMA_CREATE: Existing table {full_table_name} dropped successfully")
                 elif not if_not_exists:
                     raise MySQLQueryError(f"Table {full_table_name} already exists")
                 else:
-                    self.logger.info(f"Table {full_table_name} already exists, skipping creation")
+                    self.logger.info(f"DB_SCHEMA_CREATE: Table {full_table_name} already exists, skipping creation")
                     return True
             
             # Generate DDL
@@ -883,15 +901,17 @@ class MySQLConnector(DatabaseConnector):
             ddl = self.schema_to_ddl(table_name, schema, schema_name, use_if_not_exists, engine, charset)
             
             # Execute DDL
-            self.logger.info(f"Creating table {full_table_name}")
+            self.logger.info(f"DB_SCHEMA_CREATE: Executing CREATE TABLE DDL for {full_table_name}")
+            start_time = time.time()
             self.execute_query(ddl)
+            creation_time = time.time() - start_time
             
             # Invalidate cache since table structure may have changed
             self._invalidate_table_cache(table_name, schema_name)
             
             # Verify table was created
             if self._table_exists_impl(table_name, schema_name):
-                self.logger.info(f"Successfully created table {full_table_name}")
+                self.logger.info(f"DB_SCHEMA_CREATE: Successfully created table {full_table_name} in {creation_time:.3f}s")
                 # Cache the fact that table now exists
                 self._cache_table_exists(table_name, True, schema_name)
                 return True
@@ -900,7 +920,7 @@ class MySQLConnector(DatabaseConnector):
             
         except Exception as e:
             error_msg = f"Failed to create table {table_name}: {str(e)}"
-            self.logger.error(error_msg)
+            self.logger.error(f"DB_SCHEMA_CREATE: {error_msg}")
             raise MySQLQueryError(error_msg)
     
     def drop_table(self, table_name: str, schema_name: str = None, 

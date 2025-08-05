@@ -157,14 +157,22 @@ class PostgreSQLConnector(DatabaseConnector):
             PostgreSQLConnectionError: If connection fails after all retry attempts
         """
         if self.is_connected and self.connection_pool:
-            self.logger.info("Already connected to PostgreSQL database")
+            self.logger.info("DB_CONNECTION: Already connected to PostgreSQL database")
             return True
+        
+        host = self.connection_params.get('host')
+        port = self.connection_params.get('port')
+        database = self.connection_params.get('database')
+        username = self.connection_params.get('username')
+        pool_size = self.connection_params.get('connection_pool_size')
+        
+        self.logger.info(f"DB_CONNECTION: Initiating PostgreSQL connection to {host}:{port}/{database} as {username} with pool size {pool_size}")
         
         last_error = None
         
         for attempt in range(self.max_retries):
             try:
-                self.logger.info(f"Attempting to connect to PostgreSQL database (attempt {attempt + 1}/{self.max_retries})")
+                self.logger.info(f"DB_CONNECTION: Connection attempt {attempt + 1}/{self.max_retries} to PostgreSQL database")
                 
                 # Create connection pool
                 self.connection_pool = psycopg2.pool.ThreadedConnectionPool(
@@ -179,23 +187,24 @@ class PostgreSQLConnector(DatabaseConnector):
                 self.connection_pool.putconn(test_conn)
                 
                 self.is_connected = True
-                self.logger.info("Successfully connected to PostgreSQL database")
+                self.logger.info(f"DB_CONNECTION: Successfully established PostgreSQL connection pool (size: {pool_size})")
                 return True
                 
             except OperationalError as e:
                 last_error = e
-                self.logger.warning(f"Connection attempt {attempt + 1} failed: {str(e)}")
+                self.logger.warning(f"DB_CONNECTION: Connection attempt {attempt + 1} failed with operational error: {str(e)}")
                 
                 if attempt < self.max_retries - 1:
+                    self.logger.debug(f"DB_CONNECTION: Waiting {self.retry_delay}s before retry")
                     time.sleep(self.retry_delay)
                 
             except Exception as e:
                 last_error = e
-                self.logger.error(f"Unexpected error during connection attempt {attempt + 1}: {str(e)}")
+                self.logger.error(f"DB_CONNECTION: Unexpected error during connection attempt {attempt + 1}: {str(e)}")
                 break
         
         error_msg = f"Failed to connect to PostgreSQL database after {self.max_retries} attempts: {str(last_error)}"
-        self.logger.error(error_msg)
+        self.logger.error(f"DB_CONNECTION: {error_msg}")
         raise PostgreSQLConnectionError(error_msg)
     
     def disconnect(self) -> bool:
@@ -280,7 +289,9 @@ class PostgreSQLConnector(DatabaseConnector):
         try:
             with self._get_connection() as connection:
                 with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
-                    self.logger.debug(f"Executing query: {query[:100]}{'...' if len(query) > 100 else ''}")
+                    query_preview = query[:100] + ('...' if len(query) > 100 else '')
+                    param_count = len(params) if params else 0
+                    self.logger.debug(f"DB_QUERY_EXECUTE: Executing {query_type} query with {param_count} parameters: {query_preview}")
                     
                     start_time = time.time()
                     cursor.execute(query, params)
@@ -288,32 +299,33 @@ class PostgreSQLConnector(DatabaseConnector):
                     
                     if query_type in ['SELECT', 'WITH']:
                         results = cursor.fetchall()
-                        self.logger.debug(f"Query executed successfully in {execution_time:.3f}s, returned {len(results)} rows")
+                        result_count = len(results)
+                        self.logger.info(f"DB_QUERY_EXECUTE: {query_type} query completed in {execution_time:.3f}s, returned {result_count} rows")
                         return [dict(row) for row in results]
                     else:
                         rowcount = cursor.rowcount
                         connection.commit()
-                        self.logger.debug(f"Query executed successfully in {execution_time:.3f}s, affected {rowcount} rows")
+                        self.logger.info(f"DB_QUERY_EXECUTE: {query_type} query completed in {execution_time:.3f}s, affected {rowcount} rows")
                         return rowcount
                         
         except ProgrammingError as e:
-            error_msg = f"SQL syntax error: {str(e)}"
-            self.logger.error(error_msg)
+            error_msg = f"SQL syntax error in {query_type} query: {str(e)}"
+            self.logger.error(f"DB_QUERY_EXECUTE: {error_msg}")
             raise PostgreSQLQueryError(error_msg)
             
         except IntegrityError as e:
-            error_msg = f"Database integrity error: {str(e)}"
-            self.logger.error(error_msg)
+            error_msg = f"Database integrity error in {query_type} query: {str(e)}"
+            self.logger.error(f"DB_QUERY_EXECUTE: {error_msg}")
             raise PostgreSQLQueryError(error_msg)
             
         except DatabaseError as e:
-            error_msg = f"Database error during query execution: {str(e)}"
-            self.logger.error(error_msg)
+            error_msg = f"Database error during {query_type} query execution: {str(e)}"
+            self.logger.error(f"DB_QUERY_EXECUTE: {error_msg}")
             raise PostgreSQLQueryError(error_msg)
             
         except Exception as e:
-            error_msg = f"Unexpected error during query execution: {str(e)}"
-            self.logger.error(error_msg)
+            error_msg = f"Unexpected error during {query_type} query execution: {str(e)}"
+            self.logger.error(f"DB_QUERY_EXECUTE: {error_msg}")
             raise PostgreSQLQueryError(error_msg)
     
     def begin_transaction(self) -> bool:
@@ -795,19 +807,25 @@ class PostgreSQLConnector(DatabaseConnector):
         """
         try:
             full_table_name = f'"{schema_name}"."{table_name}"' if schema_name else f'"{table_name}"'
+            column_count = len(schema)
+            column_names = [col.get('name', 'unknown') for col in schema]
+            
+            self.logger.info(f"DB_SCHEMA_CREATE: Starting table creation for '{full_table_name}' with {column_count} columns, drop_if_exists={drop_if_exists}, if_not_exists={if_not_exists}")
+            self.logger.debug(f"DB_SCHEMA_CREATE: Table columns: {column_names}")
             
             # Check if table exists
             table_exists = self._table_exists_impl(table_name, schema_name)
             
             if table_exists:
                 if drop_if_exists:
-                    self.logger.info(f"Dropping existing table {full_table_name}")
+                    self.logger.info(f"DB_SCHEMA_CREATE: Dropping existing table {full_table_name}")
                     drop_ddl = f"DROP TABLE {full_table_name}"
                     self.execute_query(drop_ddl)
+                    self.logger.info(f"DB_SCHEMA_CREATE: Existing table {full_table_name} dropped successfully")
                 elif not if_not_exists:
                     raise PostgreSQLQueryError(f"Table {full_table_name} already exists")
                 else:
-                    self.logger.info(f"Table {full_table_name} already exists, skipping creation")
+                    self.logger.info(f"DB_SCHEMA_CREATE: Table {full_table_name} already exists, skipping creation")
                     return True
             
             # Generate DDL
@@ -815,15 +833,17 @@ class PostgreSQLConnector(DatabaseConnector):
             ddl = self.schema_to_ddl(table_name, schema, schema_name, use_if_not_exists)
             
             # Execute DDL
-            self.logger.info(f"Creating table {full_table_name}")
+            self.logger.info(f"DB_SCHEMA_CREATE: Executing CREATE TABLE DDL for {full_table_name}")
+            start_time = time.time()
             self.execute_query(ddl)
+            creation_time = time.time() - start_time
             
             # Invalidate cache since table structure may have changed
             self._invalidate_table_cache(table_name, schema_name)
             
             # Verify table was created
             if self._table_exists_impl(table_name, schema_name):
-                self.logger.info(f"Successfully created table {full_table_name}")
+                self.logger.info(f"DB_SCHEMA_CREATE: Successfully created table {full_table_name} in {creation_time:.3f}s")
                 # Cache the fact that table now exists
                 self._cache_table_exists(table_name, True, schema_name)
                 return True
@@ -832,7 +852,7 @@ class PostgreSQLConnector(DatabaseConnector):
             
         except Exception as e:
             error_msg = f"Failed to create table {table_name}: {str(e)}"
-            self.logger.error(error_msg)
+            self.logger.error(f"DB_SCHEMA_CREATE: {error_msg}")
             raise PostgreSQLQueryError(error_msg)
     
     def drop_table(self, table_name: str, schema_name: str = None, 
@@ -916,6 +936,9 @@ class PostgreSQLConnector(DatabaseConnector):
         
         try:
             full_table_name = f'"{schema_name}"."{table_name}"' if schema_name else f'"{table_name}"'
+            data_count = len(data)
+            
+            self.logger.info(f"DB_INSERT: Starting insert operation for table '{full_table_name}' with {data_count} rows, batch_size={batch_size}, on_conflict={on_conflict}")
             
             # Validate table exists
             if not self.table_exists(table_name, schema_name):
@@ -924,43 +947,56 @@ class PostgreSQLConnector(DatabaseConnector):
             # Get table schema for validation
             table_schema = self.get_table_schema(table_name, schema_name)
             column_info = {col['column_name']: col for col in table_schema}
+            column_names = list(column_info.keys())
+            
+            self.logger.debug(f"DB_INSERT: Target table schema has {len(column_names)} columns: {column_names}")
             
             # Validate and preprocess data
+            start_preprocessing = time.time()
             processed_data = self._preprocess_data(data, column_info)
+            preprocessing_time = time.time() - start_preprocessing
+            
+            self.logger.debug(f"DB_INSERT: Data preprocessing completed in {preprocessing_time:.3f}s")
             
             total_inserted = 0
             total_batches = (len(processed_data) + batch_size - 1) // batch_size
             
-            self.logger.info(f"Inserting {len(processed_data)} rows into {full_table_name} in {total_batches} batches")
+            self.logger.info(f"DB_INSERT: Processing {len(processed_data)} rows into {full_table_name} in {total_batches} batches")
             
             # Process data in batches
+            start_insert_time = time.time()
             for batch_num in range(total_batches):
                 start_idx = batch_num * batch_size
                 end_idx = min(start_idx + batch_size, len(processed_data))
                 batch_data = processed_data[start_idx:end_idx]
                 
                 try:
+                    batch_start_time = time.time()
                     rows_inserted = self._insert_batch(
                         full_table_name, batch_data, column_info, on_conflict
                     )
+                    batch_time = time.time() - batch_start_time
                     total_inserted += rows_inserted
                     
-                    self.logger.debug(f"Batch {batch_num + 1}/{total_batches}: inserted {rows_inserted} rows")
+                    self.logger.debug(f"DB_INSERT: Batch {batch_num + 1}/{total_batches} completed in {batch_time:.3f}s - inserted {rows_inserted} rows")
                     
                 except Exception as e:
                     if on_conflict == 'error':
-                        self.logger.error(f"Batch {batch_num + 1} failed: {str(e)}")
+                        self.logger.error(f"DB_INSERT: Batch {batch_num + 1} failed with error strategy - {str(e)}")
                         raise
                     else:
-                        self.logger.warning(f"Batch {batch_num + 1} failed, continuing: {str(e)}")
+                        self.logger.warning(f"DB_INSERT: Batch {batch_num + 1} failed with {on_conflict} strategy, continuing - {str(e)}")
                         continue
             
-            self.logger.info(f"Successfully inserted {total_inserted} rows into {full_table_name}")
+            total_insert_time = time.time() - start_insert_time
+            rows_per_second = total_inserted / total_insert_time if total_insert_time > 0 else 0
+            
+            self.logger.info(f"DB_INSERT: Successfully inserted {total_inserted} rows into {full_table_name} in {total_insert_time:.3f}s ({rows_per_second:.1f} rows/sec)")
             return total_inserted
             
         except Exception as e:
             error_msg = f"Failed to insert data into {table_name}: {str(e)}"
-            self.logger.error(error_msg)
+            self.logger.error(f"DB_INSERT: {error_msg}")
             raise PostgreSQLQueryError(error_msg)
     
     def _preprocess_data(self, data: List[Dict[str, Any]], 
@@ -1229,6 +1265,10 @@ class PostgreSQLConnector(DatabaseConnector):
         
         try:
             full_table_name = f'"{schema_name}"."{table_name}"' if schema_name else f'"{table_name}"'
+            data_count = len(data)
+            
+            self.logger.info(f"DB_UPSERT: Starting upsert operation for table '{full_table_name}' with {data_count} rows, batch_size={batch_size}")
+            self.logger.info(f"DB_UPSERT: Conflict columns: {conflict_columns}")
             
             # Validate table exists
             if not self.table_exists(table_name, schema_name):
@@ -1243,33 +1283,45 @@ class PostgreSQLConnector(DatabaseConnector):
                 if col not in column_info:
                     raise ValueError(f"Conflict column '{col}' does not exist in table")
             
+            self.logger.debug(f"DB_UPSERT: Validated conflict columns exist in table schema")
+            
             # Preprocess data
+            start_preprocessing = time.time()
             processed_data = self._preprocess_data(data, column_info)
+            preprocessing_time = time.time() - start_preprocessing
+            
+            self.logger.debug(f"DB_UPSERT: Data preprocessing completed in {preprocessing_time:.3f}s")
             
             total_processed = 0
             total_batches = (len(processed_data) + batch_size - 1) // batch_size
             
-            self.logger.info(f"Upserting {len(processed_data)} rows into {full_table_name}")
+            self.logger.info(f"DB_UPSERT: Processing {len(processed_data)} rows into {full_table_name} in {total_batches} batches")
             
             # Process in batches
+            start_upsert_time = time.time()
             for batch_num in range(total_batches):
                 start_idx = batch_num * batch_size
                 end_idx = min(start_idx + batch_size, len(processed_data))
                 batch_data = processed_data[start_idx:end_idx]
                 
+                batch_start_time = time.time()
                 rows_processed = self._upsert_batch(
                     full_table_name, batch_data, conflict_columns, column_info
                 )
+                batch_time = time.time() - batch_start_time
                 total_processed += rows_processed
                 
-                self.logger.debug(f"Batch {batch_num + 1}/{total_batches}: processed {rows_processed} rows")
+                self.logger.debug(f"DB_UPSERT: Batch {batch_num + 1}/{total_batches} completed in {batch_time:.3f}s - processed {rows_processed} rows")
             
-            self.logger.info(f"Successfully processed {total_processed} rows in {full_table_name}")
+            total_upsert_time = time.time() - start_upsert_time
+            rows_per_second = total_processed / total_upsert_time if total_upsert_time > 0 else 0
+            
+            self.logger.info(f"DB_UPSERT: Successfully processed {total_processed} rows in {full_table_name} in {total_upsert_time:.3f}s ({rows_per_second:.1f} rows/sec)")
             return total_processed
             
         except Exception as e:
             error_msg = f"Failed to upsert data into {table_name}: {str(e)}"
-            self.logger.error(error_msg)
+            self.logger.error(f"DB_UPSERT: {error_msg}")
             raise PostgreSQLQueryError(error_msg)
     
     def _upsert_batch(self, table_name: str, batch_data: List[Dict[str, Any]], 

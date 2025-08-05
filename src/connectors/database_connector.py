@@ -170,17 +170,23 @@ class DatabaseConnector(ABC):
         Returns:
             bool: True if table exists, False otherwise
         """
+        full_table_name = f"{schema_name}.{table_name}" if schema_name else table_name
+        self.logger.debug(f"DB_TABLE_EXISTS: Checking existence of table '{full_table_name}'")
+        
         # Try to get from cache first
         cached_result = self._get_cached_table_exists(table_name, schema_name)
         if cached_result is not None:
+            self.logger.debug(f"DB_TABLE_EXISTS: Found cached result for table '{full_table_name}': {cached_result}")
             return cached_result
         
         # Cache miss - call implementation-specific method
+        self.logger.debug(f"DB_TABLE_EXISTS: Cache miss, querying database for table '{full_table_name}'")
         exists = self._table_exists_impl(table_name, schema_name)
         
         # Cache the result
         self._cache_table_exists(table_name, exists, schema_name)
         
+        self.logger.info(f"DB_TABLE_EXISTS: Table '{full_table_name}' exists: {exists}")
         return exists
     
     def get_table_schema(self, table_name: str, schema_name: str = None) -> List[Dict[str, Any]]:
@@ -194,17 +200,25 @@ class DatabaseConnector(ABC):
         Returns:
             List of dictionaries containing column information
         """
+        full_table_name = f"{schema_name}.{table_name}" if schema_name else table_name
+        self.logger.debug(f"DB_SCHEMA_RETRIEVAL: Retrieving schema for table '{full_table_name}'")
+        
         # Try to get from cache first
         cached_schema = self._get_cached_table_schema(table_name, schema_name)
         if cached_schema is not None:
+            self.logger.debug(f"DB_SCHEMA_RETRIEVAL: Found cached schema for table '{full_table_name}' with {len(cached_schema)} columns")
             return cached_schema
         
         # Cache miss - call implementation-specific method
+        self.logger.debug(f"DB_SCHEMA_RETRIEVAL: Cache miss, querying database schema for table '{full_table_name}'")
         schema = self._get_table_schema_impl(table_name, schema_name)
         
         # Cache the result
         self._cache_table_schema(table_name, schema, schema_name)
         
+        column_count = len(schema)
+        column_names = [col.get('column_name', 'unknown') for col in schema]
+        self.logger.info(f"DB_SCHEMA_RETRIEVAL: Retrieved schema for table '{full_table_name}' - {column_count} columns: {column_names}")
         return schema
     
     def test_connection(self) -> Tuple[bool, Optional[str]]:
@@ -216,17 +230,21 @@ class DatabaseConnector(ABC):
                 - bool: True if connection test was successful, False otherwise
                 - Optional[str]: Error message if connection test failed, None otherwise
         """
+        self.logger.info("DB_CONNECTION_TEST: Starting database connection test")
         try:
             if not self.is_connected:
+                self.logger.info("DB_CONNECTION_TEST: Connection not established, attempting to connect")
                 self.connect()
             
             # Get connection info to verify connection is working
             connection_info = self.get_connection_info()
+            db_type = connection_info.get('db_type', 'unknown')
             
+            self.logger.info(f"DB_CONNECTION_TEST: Connection test successful for {db_type} database")
             return True, None
         except Exception as e:
             error_message = f"Connection test failed: {str(e)}"
-            self.logger.error(error_message)
+            self.logger.error(f"DB_CONNECTION_TEST: {error_message}")
             return False, error_message
     
     def __enter__(self):
