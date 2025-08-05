@@ -2,14 +2,19 @@
 Database Connector Factory for the Generic Data Ingestor Framework.
 
 This module provides a factory pattern implementation for creating and managing
-database connectors with support for connection pooling and configuration validation.
+database connectors with support for connection pooling, retry logic, timeout handling,
+and comprehensive configuration validation.
 """
 
 import logging
 import threading
-from typing import Any, Dict, List, Optional, Type, Union
+import time
+import asyncio
+from typing import Any, Dict, List, Optional, Type, Union, Callable
 from pathlib import Path
 import json
+from functools import wraps
+from enum import Enum
 
 from .database_connector import DatabaseConnector
 from .postgresql_connector import PostgreSQLConnector
@@ -24,16 +29,206 @@ class ConnectorFactoryError(Exception):
     pass
 
 
+class RetryStrategy(Enum):
+    """Retry strategy enumeration."""
+    EXPONENTIAL_BACKOFF = "exponential_backoff"
+    LINEAR_BACKOFF = "linear_backoff"
+    FIXED_DELAY = "fixed_delay"
+    IMMEDIATE = "immediate"
+
+
+class TimeoutError(Exception):
+    """Custom exception for timeout errors."""
+    pass
+
+
+class RetryConfig:
+    """Configuration for retry logic."""
+    
+    def __init__(self, 
+                 max_attempts: int = 3,
+                 base_delay: float = 1.0,
+                 max_delay: float = 60.0,
+                 strategy: RetryStrategy = RetryStrategy.EXPONENTIAL_BACKOFF,
+                 backoff_multiplier: float = 2.0,
+                 jitter: bool = True,
+                 retriable_exceptions: Optional[List[Type[Exception]]] = None):
+        """
+        Initialize retry configuration.
+        
+        Args:
+            max_attempts: Maximum number of retry attempts (default: 3)
+            base_delay: Base delay between retries in seconds (default: 1.0)
+            max_delay: Maximum delay between retries in seconds (default: 60.0)
+            strategy: Retry strategy to use (default: EXPONENTIAL_BACKOFF)
+            backoff_multiplier: Multiplier for exponential backoff (default: 2.0)
+            jitter: Whether to add random jitter to delays (default: True)
+            retriable_exceptions: List of exceptions that should trigger retries
+        """
+        self.max_attempts = max(1, max_attempts)
+        self.base_delay = max(0.0, base_delay)
+        self.max_delay = max(base_delay, max_delay)
+        self.strategy = strategy
+        self.backoff_multiplier = max(1.0, backoff_multiplier)
+        self.jitter = jitter
+        self.retriable_exceptions = retriable_exceptions or [
+            ConnectionError, 
+            OSError, 
+            TimeoutError,
+            Exception  # Catch-all for unknown database connection issues
+        ]
+    
+    def calculate_delay(self, attempt: int) -> float:
+        """
+        Calculate delay for a given attempt number.
+        
+        Args:
+            attempt: Current attempt number (0-based)
+            
+        Returns:
+            float: Delay in seconds
+        """
+        if self.strategy == RetryStrategy.IMMEDIATE:
+            return 0.0
+        elif self.strategy == RetryStrategy.FIXED_DELAY:
+            delay = self.base_delay
+        elif self.strategy == RetryStrategy.LINEAR_BACKOFF:
+            delay = self.base_delay * (attempt + 1)
+        elif self.strategy == RetryStrategy.EXPONENTIAL_BACKOFF:
+            delay = self.base_delay * (self.backoff_multiplier ** attempt)
+        else:
+            delay = self.base_delay
+        
+        # Cap at max_delay
+        delay = min(delay, self.max_delay)
+        
+        # Add jitter if enabled
+        if self.jitter and delay > 0:
+            import random
+            delay = delay * (0.5 + random.random() * 0.5)  # 50%-100% of calculated delay
+        
+        return delay
+    
+    def should_retry(self, exception: Exception, attempt: int) -> bool:
+        """
+        Determine if an exception should trigger a retry.
+        
+        Args:
+            exception: Exception that occurred
+            attempt: Current attempt number (0-based)
+            
+        Returns:
+            bool: True if should retry, False otherwise
+        """
+        if attempt >= self.max_attempts - 1:
+            return False
+        
+        return any(isinstance(exception, exc_type) for exc_type in self.retriable_exceptions)
+
+
+class TimeoutConfig:
+    """Configuration for timeout handling."""
+    
+    def __init__(self,
+                 connection_timeout: float = 30.0,
+                 query_timeout: float = 300.0,
+                 transaction_timeout: float = 600.0,
+                 total_timeout: Optional[float] = None):
+        """
+        Initialize timeout configuration.
+        
+        Args:
+            connection_timeout: Timeout for connection establishment (default: 30s)
+            query_timeout: Timeout for individual queries (default: 300s)
+            transaction_timeout: Timeout for transactions (default: 600s)
+            total_timeout: Total timeout for all operations (optional)
+        """
+        self.connection_timeout = max(0.0, connection_timeout)
+        self.query_timeout = max(0.0, query_timeout) if query_timeout else None
+        self.transaction_timeout = max(0.0, transaction_timeout) if transaction_timeout else None
+        self.total_timeout = max(0.0, total_timeout) if total_timeout else None
+
+
+def with_retry_and_timeout(retry_config: Optional[RetryConfig] = None,
+                          timeout_config: Optional[TimeoutConfig] = None):
+    """
+    Decorator to add retry logic and timeout handling to methods.
+    
+    Args:
+        retry_config: Retry configuration (uses default if None)
+        timeout_config: Timeout configuration (uses default if None)
+        
+    Returns:
+        Decorated function with retry and timeout logic
+    """
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            retry_cfg = retry_config or RetryConfig()
+            timeout_cfg = timeout_config or TimeoutConfig()
+            
+            logger = logging.getLogger('data_ingestion.retry_handler')
+            
+            start_total_time = time.time()
+            last_exception = None
+            
+            for attempt in range(retry_cfg.max_attempts):
+                try:
+                    # Check total timeout
+                    if timeout_cfg.total_timeout:
+                        elapsed = time.time() - start_total_time
+                        if elapsed >= timeout_cfg.total_timeout:
+                            raise TimeoutError(f"Total timeout of {timeout_cfg.total_timeout}s exceeded")
+                    
+                    # Execute the function
+                    start_time = time.time()
+                    result = func(*args, **kwargs)
+                    execution_time = time.time() - start_time
+                    
+                    # Log successful execution
+                    if attempt > 0:
+                        logger.info(f"DB_RETRY_SUCCESS: Function {func.__name__} succeeded on attempt {attempt + 1}/{retry_cfg.max_attempts} after {execution_time:.3f}s")
+                    
+                    return result
+                    
+                except Exception as e:
+                    last_exception = e
+                    
+                    # Check if we should retry
+                    if not retry_cfg.should_retry(e, attempt):
+                        logger.error(f"DB_RETRY_FAILED: Function {func.__name__} failed permanently: {str(e)}")
+                        raise e
+                    
+                    # Calculate delay for next attempt
+                    delay = retry_cfg.calculate_delay(attempt)
+                    
+                    logger.warning(f"DB_RETRY_ATTEMPT: Function {func.__name__} failed on attempt {attempt + 1}/{retry_cfg.max_attempts}: {str(e)}. Retrying in {delay:.2f}s")
+                    
+                    # Wait before retry
+                    if delay > 0:
+                        time.sleep(delay)
+            
+            # All retries exhausted
+            logger.error(f"DB_RETRY_EXHAUSTED: Function {func.__name__} failed after {retry_cfg.max_attempts} attempts. Last error: {str(last_exception)}")
+            raise last_exception
+            
+        return wrapper
+    return decorator
+
+
 class DatabaseConnectorFactory:
     """
-    Factory class for creating and managing database connectors.
+    Enhanced factory class for creating and managing database connectors.
     
     This factory provides a centralized way to create database connectors with
-    proper configuration validation, connection pooling, and resource management.
+    proper configuration validation, connection pooling, retry logic, timeout handling,
+    and comprehensive resource management.
     
     Attributes:
         supported_databases: Dictionary mapping database types to connector classes
         pool_manager: Connection pool manager instance
+        default_retry_config: Default retry configuration for all operations
+        default_timeout_config: Default timeout configuration for all operations
         logger: Logger for factory operations
     """
     
@@ -44,23 +239,32 @@ class DatabaseConnectorFactory:
         'sqlite': SQLiteConnector
     }
     
-    def __init__(self, pool_manager: Optional[ConnectionPoolManager] = None):
+    def __init__(self, 
+                 pool_manager: Optional[ConnectionPoolManager] = None,
+                 default_retry_config: Optional[RetryConfig] = None,
+                 default_timeout_config: Optional[TimeoutConfig] = None):
         """
         Initialize the database connector factory.
         
         Args:
             pool_manager: Optional connection pool manager (uses global if None)
+            default_retry_config: Default retry configuration for all operations
+            default_timeout_config: Default timeout configuration for all operations
         """
         self.pool_manager = pool_manager or get_pool_manager()
+        self.default_retry_config = default_retry_config or RetryConfig()
+        self.default_timeout_config = default_timeout_config or TimeoutConfig()
         self.logger = logging.getLogger('data_ingestion.connector_factory')
         
-        self.logger.info("Database connector factory initialized")
+        self.logger.info(f"Enhanced database connector factory initialized with retry (max_attempts={self.default_retry_config.max_attempts}) and timeout support")
     
     def create_connector(self, db_type: str, connection_params: Dict[str, Any],
                         pool_name: str = None, use_pooling: bool = True,
-                        validate_config: bool = True) -> DatabaseConnector:
+                        validate_config: bool = True,
+                        retry_config: Optional[RetryConfig] = None,
+                        timeout_config: Optional[TimeoutConfig] = None) -> DatabaseConnector:
         """
-        Create a database connector instance.
+        Create a database connector instance with retry and timeout support.
         
         Args:
             db_type: Type of database (postgresql, mysql, sqlite)
@@ -68,6 +272,8 @@ class DatabaseConnectorFactory:
             pool_name: Name for connection pool (auto-generated if None)
             use_pooling: Whether to use connection pooling
             validate_config: Whether to validate configuration
+            retry_config: Retry configuration (uses factory default if None)
+            timeout_config: Timeout configuration (uses factory default if None)
             
         Returns:
             DatabaseConnector: Configured database connector instance
@@ -76,32 +282,48 @@ class DatabaseConnectorFactory:
             ConnectorFactoryError: If connector creation fails
             ValueError: If invalid parameters provided
         """
-        try:
+        # Use provided configs or factory defaults
+        retry_cfg = retry_config or self.default_retry_config
+        timeout_cfg = timeout_config or self.default_timeout_config
+        
+        @with_retry_and_timeout(retry_cfg, timeout_cfg)
+        def _create_connector_with_retry():
             # Normalize database type
-            db_type = db_type.lower().strip()
+            db_type_normalized = db_type.lower().strip()
             
             # Validate database type
-            if db_type not in self.SUPPORTED_DATABASES:
+            if db_type_normalized not in self.SUPPORTED_DATABASES:
                 supported = ', '.join(self.SUPPORTED_DATABASES.keys())
-                raise ConnectorFactoryError(f"Unsupported database type: {db_type}. Supported types: {supported}")
+                raise ConnectorFactoryError(f"Unsupported database type: {db_type_normalized}. Supported types: {supported}")
             
             # Validate configuration if requested
+            validated_params = connection_params
             if validate_config:
-                connection_params = self._validate_configuration(db_type, connection_params)
+                validated_params = self._validate_configuration(db_type_normalized, connection_params)
             
             # Generate pool name if not provided
-            if not pool_name:
-                pool_name = self._generate_pool_name(db_type, connection_params)
+            pool_name_final = pool_name
+            if not pool_name_final:
+                pool_name_final = self._generate_pool_name(db_type_normalized, validated_params)
             
             # Create connector with or without pooling
             if use_pooling:
-                return self._create_pooled_connector(db_type, connection_params, pool_name)
+                connector = self._create_pooled_connector(db_type_normalized, validated_params, pool_name_final)
             else:
-                return self._create_direct_connector(db_type, connection_params)
-                
+                connector = self._create_direct_connector(db_type_normalized, validated_params)
+            
+            # Wrap connector with enhanced functionality if needed
+            if retry_cfg != self.default_retry_config or timeout_cfg != self.default_timeout_config:
+                connector = EnhancedConnectorWrapper(connector, retry_cfg, timeout_cfg)
+            
+            self.logger.info(f"DB_CONNECTOR_CREATED: Successfully created {db_type_normalized} connector with retry/timeout support")
+            return connector
+        
+        try:
+            return _create_connector_with_retry()
         except Exception as e:
-            error_msg = f"Failed to create {db_type} connector: {str(e)}"
-            self.logger.error(error_msg)
+            error_msg = f"Failed to create {db_type} connector after retries: {str(e)}"
+            self.logger.error(f"DB_CONNECTOR_FAILED: {error_msg}")
             raise ConnectorFactoryError(error_msg)
     
     def _validate_configuration(self, db_type: str, connection_params: Dict[str, Any]) -> Dict[str, Any]:
@@ -376,6 +598,143 @@ class DatabaseConnectorFactory:
             Dict: Health check results
         """
         return self.pool_manager.health_check(pool_name)
+    
+    def create_connector_with_config(self, config: Dict[str, Any]) -> DatabaseConnector:
+        """
+        Create a connector from a comprehensive configuration dictionary.
+        
+        Args:
+            config: Configuration dictionary containing all necessary parameters
+                   Expected keys: db_type, connection_params, retry_config, timeout_config, etc.
+                   
+        Returns:
+            DatabaseConnector: Configured connector instance
+            
+        Raises:
+            ConnectorFactoryError: If connector creation fails
+        """
+        try:
+            db_type = config.get('db_type')
+            if not db_type:
+                raise ValueError("db_type is required in configuration")
+            
+            connection_params = config.get('connection_params', {})
+            
+            # Extract retry configuration
+            retry_config = None
+            retry_settings = config.get('retry_config', {})
+            if retry_settings:
+                retry_config = RetryConfig(
+                    max_attempts=retry_settings.get('max_attempts', 3),
+                    base_delay=retry_settings.get('base_delay', 1.0),
+                    max_delay=retry_settings.get('max_delay', 60.0),
+                    strategy=RetryStrategy(retry_settings.get('strategy', 'exponential_backoff')),
+                    backoff_multiplier=retry_settings.get('backoff_multiplier', 2.0),
+                    jitter=retry_settings.get('jitter', True)
+                )
+            
+            # Extract timeout configuration
+            timeout_config = None
+            timeout_settings = config.get('timeout_config', {})
+            if timeout_settings:
+                timeout_config = TimeoutConfig(
+                    connection_timeout=timeout_settings.get('connection_timeout', 30.0),
+                    query_timeout=timeout_settings.get('query_timeout', 300.0),
+                    transaction_timeout=timeout_settings.get('transaction_timeout', 600.0),
+                    total_timeout=timeout_settings.get('total_timeout')
+                )
+            
+            return self.create_connector(
+                db_type=db_type,
+                connection_params=connection_params,
+                pool_name=config.get('pool_name'),
+                use_pooling=config.get('use_pooling', True),
+                validate_config=config.get('validate_config', True),
+                retry_config=retry_config,
+                timeout_config=timeout_config
+            )
+            
+        except Exception as e:
+            error_msg = f"Failed to create connector from configuration: {str(e)}"
+            self.logger.error(f"DB_CONNECTOR_CONFIG_FAILED: {error_msg}")
+            raise ConnectorFactoryError(error_msg)
+
+
+class EnhancedConnectorWrapper:
+    """
+    Wrapper class that adds retry and timeout functionality to any DatabaseConnector.
+    
+    This wrapper intercepts method calls to the underlying connector and applies
+    retry logic and timeout handling as configured.
+    """
+    
+    def __init__(self, connector: DatabaseConnector, 
+                 retry_config: RetryConfig, 
+                 timeout_config: TimeoutConfig):
+        """
+        Initialize the enhanced connector wrapper.
+        
+        Args:
+            connector: The underlying database connector
+            retry_config: Retry configuration to apply
+            timeout_config: Timeout configuration to apply
+        """
+        self._connector = connector
+        self._retry_config = retry_config
+        self._timeout_config = timeout_config
+        self.logger = logging.getLogger('data_ingestion.enhanced_connector')
+        
+        # Methods that should have retry/timeout applied
+        self._enhanced_methods = {
+            'connect', 'disconnect', 'execute_query', 
+            'begin_transaction', 'commit_transaction', 'rollback_transaction',
+            'table_exists', 'get_table_schema', 'create_table', 'insert_data'
+        }
+    
+    def __getattr__(self, name):
+        """
+        Delegate attribute access to the underlying connector with optional enhancement.
+        
+        Args:
+            name: Attribute name
+            
+        Returns:
+            Enhanced method or direct attribute from underlying connector
+        """
+        attr = getattr(self._connector, name)
+        
+        # If it's a method that should be enhanced, wrap it
+        if callable(attr) and name in self._enhanced_methods:
+            @with_retry_and_timeout(self._retry_config, self._timeout_config)
+            def enhanced_method(*args, **kwargs):
+                return attr(*args, **kwargs)
+            
+            # Preserve method metadata
+            enhanced_method.__name__ = name
+            enhanced_method.__doc__ = getattr(attr, '__doc__', None)
+            return enhanced_method
+        
+        return attr
+    
+    def get_connection_info(self) -> Dict[str, Any]:
+        """Get connection information including enhancement details."""
+        info = self._connector.get_connection_info()
+        info.update({
+            'enhanced': True,
+            'retry_config': {
+                'max_attempts': self._retry_config.max_attempts,
+                'strategy': self._retry_config.strategy.value,
+                'base_delay': self._retry_config.base_delay,
+                'max_delay': self._retry_config.max_delay
+            },
+            'timeout_config': {
+                'connection_timeout': self._timeout_config.connection_timeout,
+                'query_timeout': self._timeout_config.query_timeout,
+                'transaction_timeout': self._timeout_config.transaction_timeout,
+                'total_timeout': self._timeout_config.total_timeout
+            }
+        })
+        return info
 
 
 class PooledConnectorWrapper:
