@@ -15,11 +15,11 @@ from collections import defaultdict
 
 class DatabaseConnector(ABC):
     """
-    Abstract base class for database connections.
+    Abstract base class for database connections with separated concerns.
     
     This class defines the standard interface that all database connector
-    implementations must follow. It provides methods for connecting to a database,
-    executing queries, and managing transactions.
+    implementations must follow. It separates connection setup, query execution,
+    and teardown logic into distinct methods for better maintainability.
     
     Attributes:
         logger: Logger instance for the connector
@@ -46,11 +46,53 @@ class DatabaseConnector(ABC):
         self._schema_cache_lock = threading.RLock()
         self._cache_ttl = connection_params.get('schema_cache_ttl', 300)  # 5 minutes default
         self._cache_enabled = connection_params.get('enable_schema_cache', True)
+        
+        # Initialize connection setup
+        self._setup_connection_params()
+    
+    # ========================================
+    # CONNECTION SETUP METHODS
+    # ========================================
     
     @abstractmethod
+    def _setup_connection_params(self) -> None:
+        """
+        Setup and validate connection parameters.
+        
+        This method should validate required parameters, set defaults,
+        and prepare any connection-specific configuration.
+        
+        Raises:
+            ValueError: If required parameters are missing or invalid
+        """
+        pass
+    
+    @abstractmethod
+    def _build_connection_config(self) -> Dict[str, Any]:
+        """
+        Build the connection configuration from parameters.
+        
+        Returns:
+            Dict containing the finalized connection configuration
+        """
+        pass
+    
+    @abstractmethod
+    def _establish_connection(self) -> Any:
+        """
+        Establish the actual database connection.
+        
+        Returns:
+            The database connection object
+            
+        Raises:
+            ConnectionError: If connection establishment fails
+        """
+        pass
+    
     def connect(self) -> bool:
         """
-        Establish a connection to the database.
+        Establish a connection to the database using separated setup logic.
         
         Returns:
             bool: True if connection was successful, False otherwise
@@ -58,22 +100,75 @@ class DatabaseConnector(ABC):
         Raises:
             ConnectionError: If connection fails
         """
-        pass
-    
-    @abstractmethod
-    def disconnect(self) -> bool:
-        """
-        Close the database connection.
+        if self.is_connected:
+            self.logger.info("DB_CONNECTION: Already connected to database")
+            return True
         
+        try:
+            # Use separated connection setup methods
+            self.connection = self._establish_connection()
+            self.is_connected = True
+            self.logger.info("DB_CONNECTION: Successfully established database connection")
+            return True
+        except Exception as e:
+            self.logger.error(f"DB_CONNECTION: Failed to establish connection: {str(e)}")
+            raise
+    
+    # ========================================
+    # QUERY EXECUTION METHODS
+    # ========================================
+    
+    @abstractmethod
+    def _prepare_query(self, query: str, params: Optional[Union[List, Dict]] = None) -> Tuple[str, Any]:
+        """
+        Prepare and validate a query before execution.
+        
+        Args:
+            query: SQL query string to prepare
+            params: Parameters to bind to the query
+            
         Returns:
-            bool: True if disconnection was successful, False otherwise
+            Tuple of (prepared_query, prepared_params)
+            
+        Raises:
+            ValueError: If query or parameters are invalid
         """
         pass
     
     @abstractmethod
+    def _execute_prepared_query(self, prepared_query: str, prepared_params: Any) -> Any:
+        """
+        Execute a prepared query on the database connection.
+        
+        Args:
+            prepared_query: The prepared SQL query
+            prepared_params: The prepared parameters
+            
+        Returns:
+            Query results
+            
+        Raises:
+            QueryError: If query execution fails
+        """
+        pass
+    
+    @abstractmethod
+    def _process_query_results(self, raw_results: Any, query_type: str) -> Any:
+        """
+        Process raw query results into the expected format.
+        
+        Args:
+            raw_results: Raw results from query execution
+            query_type: Type of query (SELECT, INSERT, UPDATE, etc.)
+            
+        Returns:
+            Processed query results
+        """
+        pass
+    
     def execute_query(self, query: str, params: Optional[Union[List, Dict]] = None) -> Any:
         """
-        Execute a query on the database.
+        Execute a query on the database using separated execution logic.
         
         Args:
             query: SQL query string to execute
@@ -86,7 +181,76 @@ class DatabaseConnector(ABC):
             ConnectionError: If not connected to the database
             QueryError: If query execution fails
         """
+        if not self.is_connected:
+            raise ConnectionError("Not connected to database. Call connect() first.")
+        
+        try:
+            # Use separated query execution methods
+            prepared_query, prepared_params = self._prepare_query(query, params)
+            raw_results = self._execute_prepared_query(prepared_query, prepared_params)
+            
+            # Determine query type for result processing
+            query_type = query.strip().upper().split()[0] if query.strip() else "UNKNOWN"
+            processed_results = self._process_query_results(raw_results, query_type)
+            
+            return processed_results
+            
+        except Exception as e:
+            self.logger.error(f"DB_QUERY_EXECUTE: Query execution failed: {str(e)}")
+            raise
+    
+    # ========================================
+    # TEARDOWN METHODS
+    # ========================================
+    
+    @abstractmethod
+    def _cleanup_connection(self) -> None:
+        """
+        Perform connection-specific cleanup operations.
+        
+        This method should handle closing cursors, rolling back transactions,
+        and performing any other cleanup needed before disconnection.
+        """
         pass
+    
+    @abstractmethod
+    def _close_connection(self) -> None:
+        """
+        Close the actual database connection.
+        
+        Raises:
+            Exception: If connection closure fails
+        """
+        pass
+    
+    def disconnect(self) -> bool:
+        """
+        Close the database connection using separated teardown logic.
+        
+        Returns:
+            bool: True if disconnection was successful, False otherwise
+        """
+        if not self.is_connected:
+            self.logger.info("DB_DISCONNECT: Already disconnected from database")
+            return True
+        
+        try:
+            # Use separated teardown methods
+            self._cleanup_connection()
+            self._close_connection()
+            
+            self.connection = None
+            self.is_connected = False
+            self.logger.info("DB_DISCONNECT: Successfully disconnected from database")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"DB_DISCONNECT: Error during disconnection: {str(e)}")
+            return False
+    
+    # ========================================
+    # TRANSACTION MANAGEMENT METHODS
+    # ========================================
     
     @abstractmethod
     def begin_transaction(self) -> bool:
@@ -117,6 +281,10 @@ class DatabaseConnector(ABC):
             bool: True if transaction was successfully rolled back, False otherwise
         """
         pass
+    
+    # ========================================
+    # CONNECTION INFO AND SCHEMA METHODS
+    # ========================================
     
     @abstractmethod
     def get_connection_info(self) -> Dict[str, Any]:
@@ -158,6 +326,10 @@ class DatabaseConnector(ABC):
             List of dictionaries containing column information
         """
         pass
+    
+    # ========================================
+    # UTILITY AND CACHING METHODS
+    # ========================================
     
     def table_exists(self, table_name: str, schema_name: str = None) -> bool:
         """

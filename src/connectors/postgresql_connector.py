@@ -66,13 +66,16 @@ class PostgreSQLConnector(DatabaseConnector):
         self.max_retries = connection_params.get('max_retries', 3)
         self.retry_delay = connection_params.get('retry_delay', 1)
         
-        # Validate PostgreSQL-specific parameters
-        self._validate_connection_params()
-        
-        # Build connection string
-        self.connection_string = self._build_connection_string()
-        
         self.logger.info(f"PostgreSQL connector initialized for database: {self.connection_params.get('database')}")
+    
+    def _setup_connection_params(self) -> None:
+        """
+        Setup and validate PostgreSQL connection parameters.
+        
+        Raises:
+            ValueError: If required parameters are missing or invalid
+        """
+        self._validate_connection_params()
     
     def _validate_connection_params(self) -> None:
         """
@@ -102,6 +105,20 @@ class PostgreSQLConnector(DatabaseConnector):
         # Set default connection timeout
         if 'connection_timeout' not in self.connection_params:
             self.connection_params['connection_timeout'] = 30
+    
+    def _build_connection_config(self) -> Dict[str, Any]:
+        """
+        Build PostgreSQL connection configuration from parameters.
+        
+        Returns:
+            Dict containing the finalized connection configuration
+        """
+        return {
+            'connection_string': self._build_connection_string(),
+            'pool_size': self.connection_params['connection_pool_size'],
+            'max_retries': self.max_retries,
+            'retry_delay': self.retry_delay
+        }
     
     def _build_connection_string(self) -> str:
         """
@@ -146,73 +163,73 @@ class PostgreSQLConnector(DatabaseConnector):
         
         return " ".join(conn_params)
     
-    def connect(self) -> bool:
+    def _establish_connection(self) -> Any:
         """
-        Establish a connection pool to the PostgreSQL database.
+        Establish the PostgreSQL database connection pool.
         
         Returns:
-            bool: True if connection was successful, False otherwise
-        
+            psycopg2 connection pool
+            
         Raises:
-            PostgreSQLConnectionError: If connection fails after all retry attempts
+            PostgreSQLConnectionError: If connection establishment fails
         """
-        if self.is_connected and self.connection_pool:
-            self.logger.info("DB_CONNECTION: Already connected to PostgreSQL database")
-            return True
+        config = self._build_connection_config()
+        connection_string = config['connection_string']
+        pool_size = config['pool_size']
+        max_retries = config['max_retries']
+        retry_delay = config['retry_delay']
         
         host = self.connection_params.get('host')
         port = self.connection_params.get('port')
         database = self.connection_params.get('database')
         username = self.connection_params.get('username')
-        pool_size = self.connection_params.get('connection_pool_size')
         
         self.logger.info(f"DB_CONNECTION: Initiating PostgreSQL connection to {host}:{port}/{database} as {username} with pool size {pool_size}")
         
         last_error = None
         
-        for attempt in range(self.max_retries):
+        for attempt in range(max_retries):
             try:
-                self.logger.info(f"DB_CONNECTION: Connection attempt {attempt + 1}/{self.max_retries} to PostgreSQL database")
+                self.logger.info(f"DB_CONNECTION: Connection attempt {attempt + 1}/{max_retries} to PostgreSQL database")
                 
                 # Create connection pool
-                self.connection_pool = psycopg2.pool.ThreadedConnectionPool(
+                connection_pool = psycopg2.pool.ThreadedConnectionPool(
                     minconn=1,
-                    maxconn=self.connection_params['connection_pool_size'],
-                    dsn=self.connection_string
+                    maxconn=pool_size,
+                    dsn=connection_string
                 )
                 
                 # Test the connection by getting one from the pool
-                test_conn = self.connection_pool.getconn()
+                test_conn = connection_pool.getconn()
                 test_conn.close()
-                self.connection_pool.putconn(test_conn)
+                connection_pool.putconn(test_conn)
                 
-                self.is_connected = True
+                self.connection_pool = connection_pool
                 self.logger.info(f"DB_CONNECTION: Successfully established PostgreSQL connection pool (size: {pool_size})")
-                return True
+                return connection_pool
                 
             except OperationalError as e:
                 last_error = e
                 self.logger.warning(f"DB_CONNECTION: Connection attempt {attempt + 1} failed with operational error: {str(e)}")
                 
-                if attempt < self.max_retries - 1:
-                    self.logger.debug(f"DB_CONNECTION: Waiting {self.retry_delay}s before retry")
-                    time.sleep(self.retry_delay)
+                if attempt < max_retries - 1:
+                    self.logger.debug(f"DB_CONNECTION: Waiting {retry_delay}s before retry")
+                    time.sleep(retry_delay)
                 
             except Exception as e:
                 last_error = e
                 self.logger.error(f"DB_CONNECTION: Unexpected error during connection attempt {attempt + 1}: {str(e)}")
                 break
         
-        error_msg = f"Failed to connect to PostgreSQL database after {self.max_retries} attempts: {str(last_error)}"
+        error_msg = f"Failed to connect to PostgreSQL database after {max_retries} attempts: {str(last_error)}"
         self.logger.error(f"DB_CONNECTION: {error_msg}")
         raise PostgreSQLConnectionError(error_msg)
     
-    def disconnect(self) -> bool:
+    # Connection method is now handled by the base class
+    
+    def _cleanup_connection(self) -> None:
         """
-        Close all connections in the connection pool.
-        
-        Returns:
-            bool: True if disconnection was successful, False otherwise
+        Perform PostgreSQL-specific cleanup operations.
         """
         try:
             if self.current_connection:
@@ -220,18 +237,116 @@ class PostgreSQLConnector(DatabaseConnector):
                     self.rollback_transaction()
                 self.connection_pool.putconn(self.current_connection)
                 self.current_connection = None
+        except Exception as e:
+            self.logger.warning(f"Error during connection cleanup: {str(e)}")
+    
+    def _close_connection(self) -> None:
+        """
+        Close the PostgreSQL connection pool.
+        
+        Raises:
+            Exception: If connection closure fails
+        """
+        if self.connection_pool:
+            self.connection_pool.closeall()
+            self.connection_pool = None
+    
+    # Disconnect method is now handled by the base class
+    
+    def _prepare_query(self, query: str, params: Optional[Union[List, Dict]] = None) -> Tuple[str, Any]:
+        """
+        Prepare and validate a PostgreSQL query before execution.
+        
+        Args:
+            query: SQL query string to prepare
+            params: Parameters to bind to the query
             
-            if self.connection_pool:
-                self.connection_pool.closeall()
-                self.connection_pool = None
+        Returns:
+            Tuple of (prepared_query, prepared_params)
             
-            self.is_connected = False
-            self.logger.info("Successfully disconnected from PostgreSQL database")
-            return True
+        Raises:
+            PostgreSQLQueryError: If query or parameters are invalid
+        """
+        if not query or not query.strip():
+            raise PostgreSQLQueryError("Query cannot be empty")
+        
+        # PostgreSQL uses %s placeholders - no special preparation needed
+        return query, params
+    
+    def _execute_prepared_query(self, prepared_query: str, prepared_params: Any) -> Any:
+        """
+        Execute a prepared query on the PostgreSQL connection.
+        
+        Args:
+            prepared_query: The prepared SQL query
+            prepared_params: The prepared parameters
+            
+        Returns:
+            Raw query results from psycopg2
+            
+        Raises:
+            PostgreSQLQueryError: If query execution fails
+        """
+        try:
+            with self._get_connection() as connection:
+                with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+                    query_preview = prepared_query[:100] + ('...' if len(prepared_query) > 100 else '')
+                    param_count = len(prepared_params) if prepared_params else 0
+                    query_type = prepared_query.strip().upper().split()[0]
+                    
+                    self.logger.debug(f"DB_QUERY_EXECUTE: Executing {query_type} query with {param_count} parameters: {query_preview}")
+                    
+                    start_time = time.time()
+                    cursor.execute(prepared_query, prepared_params)
+                    execution_time = time.time() - start_time
+                    
+                    # Return raw results with metadata
+                    return {
+                        'cursor': cursor,
+                        'query_type': query_type,
+                        'execution_time': execution_time,
+                        'connection': connection
+                    }
+                    
+        except (ProgrammingError, IntegrityError, DatabaseError) as e:
+            query_type = prepared_query.strip().upper().split()[0] if prepared_query.strip() else "UNKNOWN"
+            error_msg = f"Database error during {query_type} query execution: {str(e)}"
+            self.logger.error(f"DB_QUERY_EXECUTE: {error_msg}")
+            raise PostgreSQLQueryError(error_msg)
             
         except Exception as e:
-            self.logger.error(f"Error during disconnection: {str(e)}")
-            return False
+            query_type = prepared_query.strip().upper().split()[0] if prepared_query.strip() else "UNKNOWN"
+            error_msg = f"Unexpected error during {query_type} query execution: {str(e)}"
+            self.logger.error(f"DB_QUERY_EXECUTE: {error_msg}")
+            raise PostgreSQLQueryError(error_msg)
+    
+    def _process_query_results(self, raw_results: Any, query_type: str) -> Any:
+        """
+        Process raw PostgreSQL query results into the expected format.
+        
+        Args:
+            raw_results: Raw results from _execute_prepared_query
+            query_type: Type of query (SELECT, INSERT, UPDATE, etc.)
+            
+        Returns:
+            Processed query results
+        """
+        cursor = raw_results['cursor']
+        execution_time = raw_results['execution_time']
+        connection = raw_results['connection']
+        
+        if query_type in ['SELECT', 'WITH']:
+            results = cursor.fetchall()
+            result_count = len(results)
+            self.logger.info(f"DB_QUERY_EXECUTE: {query_type} query completed in {execution_time:.3f}s, returned {result_count} rows")
+            return [dict(row) for row in results]
+        else:
+            rowcount = cursor.rowcount
+            connection.commit()
+            self.logger.info(f"DB_QUERY_EXECUTE: {query_type} query completed in {execution_time:.3f}s, affected {rowcount} rows")
+            return rowcount
+    
+    # Execute query method is now handled by the base class
     
     @contextmanager
     def _get_connection(self):
@@ -266,67 +381,7 @@ class PostgreSQLConnector(DatabaseConnector):
             if connection:
                 self.connection_pool.putconn(connection)
     
-    def execute_query(self, query: str, params: Optional[Union[List, Dict]] = None) -> Any:
-        """
-        Execute a query on the PostgreSQL database.
-        
-        Args:
-            query: SQL query string to execute
-            params: Parameters to bind to the query
-            
-        Returns:
-            Query results for SELECT queries, row count for INSERT/UPDATE/DELETE
-            
-        Raises:
-            PostgreSQLConnectionError: If not connected to the database
-            PostgreSQLQueryError: If query execution fails
-        """
-        if not query or not query.strip():
-            raise PostgreSQLQueryError("Query cannot be empty")
-        
-        query_type = query.strip().upper().split()[0]
-        
-        try:
-            with self._get_connection() as connection:
-                with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
-                    query_preview = query[:100] + ('...' if len(query) > 100 else '')
-                    param_count = len(params) if params else 0
-                    self.logger.debug(f"DB_QUERY_EXECUTE: Executing {query_type} query with {param_count} parameters: {query_preview}")
-                    
-                    start_time = time.time()
-                    cursor.execute(query, params)
-                    execution_time = time.time() - start_time
-                    
-                    if query_type in ['SELECT', 'WITH']:
-                        results = cursor.fetchall()
-                        result_count = len(results)
-                        self.logger.info(f"DB_QUERY_EXECUTE: {query_type} query completed in {execution_time:.3f}s, returned {result_count} rows")
-                        return [dict(row) for row in results]
-                    else:
-                        rowcount = cursor.rowcount
-                        connection.commit()
-                        self.logger.info(f"DB_QUERY_EXECUTE: {query_type} query completed in {execution_time:.3f}s, affected {rowcount} rows")
-                        return rowcount
-                        
-        except ProgrammingError as e:
-            error_msg = f"SQL syntax error in {query_type} query: {str(e)}"
-            self.logger.error(f"DB_QUERY_EXECUTE: {error_msg}")
-            raise PostgreSQLQueryError(error_msg)
-            
-        except IntegrityError as e:
-            error_msg = f"Database integrity error in {query_type} query: {str(e)}"
-            self.logger.error(f"DB_QUERY_EXECUTE: {error_msg}")
-            raise PostgreSQLQueryError(error_msg)
-            
-        except DatabaseError as e:
-            error_msg = f"Database error during {query_type} query execution: {str(e)}"
-            self.logger.error(f"DB_QUERY_EXECUTE: {error_msg}")
-            raise PostgreSQLQueryError(error_msg)
-            
-        except Exception as e:
-            error_msg = f"Unexpected error during {query_type} query execution: {str(e)}"
-            self.logger.error(f"DB_QUERY_EXECUTE: {error_msg}")
-            raise PostgreSQLQueryError(error_msg)
+    # Execute query method is now handled by the base class
     
     def begin_transaction(self) -> bool:
         """
