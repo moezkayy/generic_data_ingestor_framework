@@ -510,7 +510,7 @@ class MySQLConnector(DatabaseConnector):
             self.logger.error(error_msg)
             raise MySQLQueryError(error_msg)
     
-    def get_table_schema(self, table_name: str, schema_name: str = None) -> List[Dict[str, Any]]:
+    def _get_table_schema_impl(self, table_name: str, schema_name: str = None) -> List[Dict[str, Any]]:
         """
         Get schema information for a specific table.
         
@@ -556,7 +556,7 @@ class MySQLConnector(DatabaseConnector):
             self.logger.error(error_msg)
             raise MySQLQueryError(error_msg)
     
-    def table_exists(self, table_name: str, schema_name: str = None) -> bool:
+    def _table_exists_impl(self, table_name: str, schema_name: str = None) -> bool:
         """
         Check if a table exists in the MySQL database.
         
@@ -865,7 +865,7 @@ class MySQLConnector(DatabaseConnector):
             full_table_name = f"`{schema_name}`.`{table_name}`" if schema_name else f"`{table_name}`"
             
             # Check if table exists
-            table_exists = self.table_exists(table_name, schema_name)
+            table_exists = self._table_exists_impl(table_name, schema_name)
             
             if table_exists:
                 if drop_if_exists:
@@ -886,9 +886,14 @@ class MySQLConnector(DatabaseConnector):
             self.logger.info(f"Creating table {full_table_name}")
             self.execute_query(ddl)
             
+            # Invalidate cache since table structure may have changed
+            self._invalidate_table_cache(table_name, schema_name)
+            
             # Verify table was created
-            if self.table_exists(table_name, schema_name):
+            if self._table_exists_impl(table_name, schema_name):
                 self.logger.info(f"Successfully created table {full_table_name}")
+                # Cache the fact that table now exists
+                self._cache_table_exists(table_name, True, schema_name)
                 return True
             else:
                 raise MySQLQueryError(f"Table {full_table_name} was not created")
@@ -934,6 +939,9 @@ class MySQLConnector(DatabaseConnector):
             
             self.logger.info(f"Dropping table {full_table_name}")
             self.execute_query(drop_ddl)
+            
+            # Invalidate cache since table no longer exists
+            self._invalidate_table_cache(table_name, schema_name)
             
             self.logger.info(f"Successfully dropped table {full_table_name}")
             return True
