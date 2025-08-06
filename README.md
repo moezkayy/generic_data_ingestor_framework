@@ -156,21 +156,83 @@ While the framework currently focuses on JSON processing, several enhancements a
 1. Clone the repository
 2. Install dependencies: `pip install -r requirements.txt`
 
-### Basic Usage
+### Usage Options
+
+The framework offers two ways to interact with the data ingestion system:
+
+#### 1. **Streamlit Web Interface (Recommended)** 🌐
+
+Launch the interactive web application for a user-friendly experience:
+
+```bash
+# Start the Streamlit web interface
+streamlit run app.py
+```
+
+The web interface provides:
+- **📁 Upload Tab**: Drag-and-drop file uploads or directory selection
+- **📋 Schema Tab**: Interactive schema preview and column type overrides
+- **🚀 Ingest Tab**: One-click data processing with real-time progress tracking
+- **📊 Results Tab**: Visual analytics and processing summaries
+- **📝 Logs Tab**: Detailed processing logs and system information
+
+**Features of the Web Interface:**
+- 🗄️ **Database Configuration**: Sidebar-based setup for PostgreSQL, MySQL, and SQLite
+- 🔐 **Secure Credentials**: Integration with Streamlit Secrets and environment variables
+- 📊 **Schema Management**: Toggle validation, preview schemas, override column types
+- 🎯 **Loading Strategies**: Choose between append, replace, or upsert operations
+- 💾 **Preset Management**: Save and load configuration presets
+- 📈 **Real-time Feedback**: Progress bars, status messages, and expandable log panels
+- 🔄 **Batch Processing**: Upload multiple files with per-file status tracking
+- 📱 **Responsive Design**: Polished interface that works on desktop and mobile
+
+#### 2. **Command Line Interface** ⌨️
+
+For programmatic usage and automation:
 
 ```bash
 # Process a directory of JSON files
 python main.py /path/to/data/directory --output /path/to/output --file-types json
+
+# With database loading
+python main.py /path/to/data --db-type postgresql --db-host localhost --db-name mydb --db-user postgres --table-name data_table
 ```
 
 ### Command Line Options
 
+#### Core Arguments
 - `directory`: Path to scan for data files
 - `--output, -o`: Output directory (default: "output")
 - `--log-level`: Logging level (DEBUG, INFO, WARNING, ERROR)
 - `--dry-run`: Show what would be processed without actual processing
 - `--file-types`: File types to process (json, csv, parquet)
 - `--recursive`: Scan directories recursively (default: True)
+
+#### Database Configuration
+- `--database-url`: Complete database URL (e.g., `postgresql://user:pass@host:port/db`)
+- `--db-config-file`: Path to JSON/YAML configuration file
+- `--db-type`: Database type (postgresql, mysql, sqlite)
+- `--db-host`: Database host (default: localhost)
+- `--db-port`: Database port
+- `--db-name`: Database name
+- `--db-user`: Database username
+- `--db-password`: Database password
+- `--table-name`: Target table name (default: ingested_data)
+- `--load-strategy`: Data loading strategy (append, replace, upsert)
+- `--batch-size`: Batch size for database operations (default: 1000)
+
+#### Database Examples
+```bash
+# Using database URL
+python main.py /data --database-url postgresql://user:pass@localhost:5432/mydb
+
+# Using configuration file
+python main.py /data --db-config-file config/database.yaml
+
+# Direct configuration with environment variables
+export DB_PASSWORD=mypassword
+python main.py /data --db-type postgresql --db-host localhost --db-name mydb --db-user postgres
+```
 
 ## 📝 Conclusion
 
