@@ -1,0 +1,91 @@
+[
+  {
+    "transaction_id": "TXN-20250120-001",
+    "account_number": "ACC-789012345",
+    "transaction_type": "debit",
+    "amount": -125.50,
+    "currency": "USD",
+    "description": "Grocery Store Purchase",
+    "merchant": {
+      "name": "Fresh Market Groceries",
+      "category": "grocery",
+      "location": "New York, NY",
+      "merchant_id": "MER-123456"
+    },
+    "timestamp": "2025-01-20T12:34:56Z",
+    "payment_method": {
+      "type": "debit_card",
+      "last_four_digits": "4567",
+      "card_network": "Visa"
+    },
+    "balance_after": 2874.50,
+    "fees": {
+      "transaction_fee": 0.00,
+      "foreign_exchange_fee": 0.00
+    },
+    "tags": ["groceries", "food", "essential"],
+    "is_recurring": false,
+    "location": {
+      "city": "New York",
+      "state": "NY",
+      "country": "USA",
+      "zip_code": "10001"
+    }
+  },
+  {
+    "transaction_id": "TXN-20250120-002",
+    "account_number": "ACC-789012345",
+    "transaction_type": "credit",
+    "amount": 3200.00,
+    "currency": "USD",
+    "description": "Salary Deposit",
+    "merchant": {
+      "name": "TechCorp Industries",
+      "category": "employer",
+      "location": "San Francisco, CA",
+      "merchant_id": "MER-789012"
+    },
+    "timestamp": "2025-01-20T09:00:00Z",
+    "payment_method": {
+      "type": "direct_deposit",
+      "last_four_digits": null,
+      "card_network": null
+    },
+    "balance_after": 6074.50,
+    "fees": {
+      "transaction_fee": 0.00,
+      "foreign_exchange_fee": 0.00
+    },
+    "tags": ["salary", "income", "employment"],
+    "is_recurring": true,
+    "location": null
+  },
+  {
+    "transaction_id": "TXN-20250119-003",
+    "account_number": "ACC-789012345", 
+    "transaction_type": "debit",
+    "amount": -89.99,
+    "currency": "USD",
+    "description": "Streaming Service Subscription",
+    "merchant": {
+      "name": "StreamFlix Premium",
+      "category": "entertainment",
+      "location": "Online",
+      "merchant_id": "MER-456789"
+    },
+    "timestamp": "2025-01-19T18:30:00Z",
+    "payment_method": {
+      "type": "credit_card",
+      "last_four_digits": "8901",
+      "card_network": "Mastercard"
+    },
+    "balance_after": 2984.51,
+    "fees": {
+      "transaction_fee": 0.00,
+      "foreign_exchange_fee": 0.00
+    },
+    "tags": ["subscription", "entertainment", "monthly"],
+    "is_recurring": true,
+    "location": null
+  }
+]

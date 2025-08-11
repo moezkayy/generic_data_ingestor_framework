@@ -1,241 +1,288 @@
-# 📦 Generic Data Ingestor Framework
+# 📊 Generic Data Ingestion Framework - FYP Version
 
-A robust, modular Python framework for ingesting, processing, and analyzing semi-structured data sources with automatic schema inference and data validation.
+A simplified Python framework for ingesting and processing JSON data files with automatic schema inference and SQLite database storage. Designed for academic demonstration and final year project requirements.
 
-## 🚀 Overview
+## 🎯 Project Overview
 
-The Generic Data Ingestor Framework is a comprehensive solution for handling semi-structured data sources, particularly JSON files. It provides a complete pipeline for data ingestion, including file scanning, schema inference, data validation, and reporting. The framework is designed to be extensible, allowing for easy addition of new data formats and processing capabilities.
+This is an educational implementation of a data ingestion framework that demonstrates core concepts of data processing, schema inference, and database integration. It focuses on simplicity and clear demonstration of fundamental principles.
 
-## Key Features
+### Key Features (Simplified)
 
-- 🔍 Automatic file discovery and processing
-- 📊 Schema inference for JSON data (including nested structures)
-- 🔄 JSON flattening to handle complex nested structures
-- ✅ Data validation against inferred schemas
-- 📝 Comprehensive logging and error handling
-- 📈 Performance metrics and processing statistics
-- 📋 Report generation for processed data
+- 📁 JSON file processing and validation
+- 🔍 Automatic schema inference from data
+- 💾 SQLite database storage
+- 🌐 Simple web interface using Streamlit
+- ⌨️ Command-line interface for automation
+- 📊 Basic error handling and logging
 
-## 🛠️ Project Journey
+### Academic Focus Areas
 
-### Initial Development Phase
+This project demonstrates understanding of:
+- File I/O operations and data processing
+- JSON parsing and validation
+- Database design and integration
+- Schema inference algorithms  
+- Web interface development
+- Error handling strategies
+- Modular software architecture
 
-The project began with a simple goal: create a tool to ingest and process JSON data files. The initial implementation focused on basic file handling and simple JSON parsing. However, I quickly encountered challenges with more complex data structures.
+## 🏗️ Simplified Architecture
 
-### Challenge: Nested JSON Structures
+```
+src/
+├── core/
+│   └── application.py          # Main application logic
+├── connectors/
+│   ├── database_connector.py   # Base database interface
+│   ├── sqlite_connector.py     # SQLite implementation
+│   └── connector_factory.py    # Simple factory pattern
+├── processors/
+│   ├── json_processor.py       # JSON data processing
+│   └── schema_processor.py     # Schema inference
+├── scanners/
+│   └── file_scanner.py         # File discovery
+└── handlers/
+    ├── file_handler.py         # File operations
+    ├── error_handler.py        # Error management
+    └── logging_handler.py      # Logging utilities
+```
 
-One of the first major challenges was handling nested JSON structures. Simple flat JSON files were easy to process, but real-world data often contains nested objects and arrays. This required developing a more sophisticated approach to:
+### Design Patterns Demonstrated
 
-1. Parse nested structures recursively
-2. Infer schemas for complex hierarchical data
-3. Flatten nested JSON for easier processing
-
-The solution was to implement a recursive JSON flattening algorithm in the JSONProcessor class that could handle arbitrary levels of nesting while preserving the relationship between fields.
-
-### Modular Architecture Evolution
-
-As the project grew in complexity, I recognized the need for a more modular architecture. This led to the separation of concerns into distinct components:
-
-- Core: Application orchestration and workflow management
-- Handlers: File operations, error handling, and logging
-- Processors: Data processing and transformation logic
-- Scanners: File discovery and metadata extraction
-- Utils: Reporting and utility functions
-
-This modular approach improved code maintainability and made it easier to extend the framework with new capabilities.
-
-### Error Handling Improvements
-
-Robust error handling became a priority as the framework was tested with diverse data sources. The ErrorHandler class was developed to:
-
-- Categorize errors (recoverable vs. non-recoverable)
-- Provide detailed error logging
-- Attempt recovery strategies (e.g., trying different file encodings)
-- Generate error summaries for reporting
-
-### Schema Processing Advancements
-
-The schema processing capabilities evolved significantly throughout the project:
-
-- Initial support for flat JSON schema inference
-- Addition of nested schema detection and representation
-- Schema merging to handle variations across multiple files
-- Schema flattening for simplified data models
-- Schema validation and consistency checking
-
-## 🏗️ Architecture
-
-The framework follows a modular architecture with clear separation of concerns:
-
-### Core Components
-
-- DataIngestionApplication: Main application orchestrator that coordinates the ingestion workflow
-- JSONProcessor: Handles JSON file processing, flattening, and validation
-- SchemaProcessor: Manages schema inference, merging, and validation
-- FileHandler: Provides file system operations and metadata extraction
-- ErrorHandler: Manages error logging, recovery, and reporting
-- FileScanner: Discovers and categorizes data files
-- ReportGenerator: Creates processing reports and summaries
-
-### Workflow
-
-1. Discovery: Scan directories for data files
-2. Processing: Parse files and infer schemas
-3. Validation: Validate data against schemas
-4. Transformation: Flatten nested structures if needed
-5. Output: Generate processed data and reports
-6. Reporting: Summarize processing statistics and errors
-
-## 💡 Technical Challenges & Solutions
-
-### Challenge: Schema Inference for Diverse Data
-
-**Problem**: JSON data can vary widely in structure, making schema inference challenging.
-
-**Solution**: Implemented a sophisticated schema inference system that:
-- Analyzes sample data to determine field types
-- Handles arrays, objects, and primitive types
-- Merges schemas from multiple instances to create a comprehensive schema
-- Detects patterns in string fields (dates, emails, etc.)
-
-### Challenge: Handling Large Files
-
-**Problem**: Large JSON files could cause memory issues when loaded entirely.
-
-**Solution**: Implemented streaming processing for large files and chunked processing where appropriate.
-
-### Challenge: Nested JSON Flattening
-
-**Problem**: Nested JSON structures are difficult to work with directly.
-
-**Solution**: Created a recursive flattening algorithm that:
-- Preserves the relationship between nested fields using dot notation
-- Handles arrays with special indexing
-- Allows configurable maximum depth
-- Maintains type information during flattening
-
-### Challenge: Error Recovery
-
-**Problem**: Various file issues (encoding, format) could halt processing.
-
-**Solution**: Implemented recovery strategies:
-- Automatic encoding detection and fallback options
-- Graceful error handling with detailed logging
-- Continuation of processing despite individual file failures
-
-## 📊 Performance Considerations
-
-The framework includes performance monitoring and optimization:
-
-- Processing time tracking for each file
-- Records-per-second metrics
-- MB-per-second throughput calculation
-- Memory usage optimization for large files
-- Parallel processing capabilities for multi-file workloads
-
-## 🔜 Future Enhancements
-
-While the framework currently focuses on JSON processing, several enhancements are planned:
-
-- Support for CSV and Parquet file formats
-- Database integration for direct loading
-- Schema evolution tracking
-- Incremental processing and change detection
-- Web interface for monitoring and configuration
-- Expanded validation rules and custom validators
+- **Factory Pattern**: Database connector creation
+- **Strategy Pattern**: Data processing approaches
+- **Modular Architecture**: Clear separation of concerns
+- **Error Handling**: Graceful failure management
 
 ## 🚀 Getting Started
 
 ### Prerequisites
 
-- Python 3.8+
-- Required packages (see requirements.txt)
+- Python 3.8 or higher
+- Basic understanding of JSON data format
+- SQLite (included with Python)
 
 ### Installation
 
-1. Clone the repository
-2. Install dependencies: `pip install -r requirements.txt`
+1. Clone the repository:
+   ```bash
+   git clone <repository-url>
+   cd generic_data_ingestor_framework
+   ```
+
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
 ### Usage Options
 
-The framework offers two ways to interact with the data ingestion system:
+#### Option 1: Web Interface (Recommended)
 
-#### 1. **Streamlit Web Interface (Recommended)** 🌐
-
-Launch the interactive web application for a user-friendly experience:
+Launch the simplified Streamlit interface:
 
 ```bash
-# Start the Streamlit web interface
 streamlit run app.py
 ```
 
-The web interface provides:
-- **📁 Upload Tab**: Drag-and-drop file uploads or directory selection
-- **📋 Schema Tab**: Interactive schema preview and column type overrides
-- **🚀 Ingest Tab**: One-click data processing with real-time progress tracking
-- **📊 Results Tab**: Visual analytics and processing summaries
-- **📝 Logs Tab**: Detailed processing logs and system information
+**Web Interface Features:**
+- 📤 File upload with drag-and-drop
+- 🔍 Automatic data analysis 
+- 💾 SQLite database storage
+- 📊 Results preview and download
+- ✅ Processing status indicators
 
-**Features of the Web Interface:**
-- 🗄️ **Database Configuration**: Sidebar-based setup for PostgreSQL, MySQL, and SQLite
-- 🔐 **Secure Credentials**: Integration with Streamlit Secrets and environment variables
-- 📊 **Schema Management**: Toggle validation, preview schemas, override column types
-- 🎯 **Loading Strategies**: Choose between append, replace, or upsert operations
-- 💾 **Preset Management**: Save and load configuration presets
-- 📈 **Real-time Feedback**: Progress bars, status messages, and expandable log panels
-- 🔄 **Batch Processing**: Upload multiple files with per-file status tracking
-- 📱 **Responsive Design**: Polished interface that works on desktop and mobile
+#### Option 2: Command Line
 
-#### 2. **Command Line Interface** ⌨️
-
-For programmatic usage and automation:
+Use the simple CLI for batch processing:
 
 ```bash
-# Process a directory of JSON files
-python main.py /path/to/data/directory --output /path/to/output --file-types json
+# Basic usage
+python main.py data/
 
-# With database loading
-python main.py /path/to/data --db-type postgresql --db-host localhost --db-name mydb --db-user postgres --table-name data_table
+# Specify output database and table
+python main.py data/ --output mydata.db --table customers
+
+# Quiet mode (minimal output)
+python main.py data/ --quiet
 ```
 
-### Command Line Options
+**CLI Options:**
+- `directory`: Path to folder containing JSON files
+- `--output, -o`: SQLite database file name (default: output.db)
+- `--table, -t`: Table name (default: processed_data)
+- `--quiet, -q`: Suppress informational messages
 
-#### Core Arguments
-- `directory`: Path to scan for data files
-- `--output, -o`: Output directory (default: "output")
-- `--log-level`: Logging level (DEBUG, INFO, WARNING, ERROR)
-- `--dry-run`: Show what would be processed without actual processing
-- `--file-types`: File types to process (json, csv, parquet)
-- `--recursive`: Scan directories recursively (default: True)
+## 📋 Example Workflow
 
-#### Database Configuration
-- `--database-url`: Complete database URL (e.g., `postgresql://user:pass@host:port/db`)
-- `--db-config-file`: Path to JSON/YAML configuration file
-- `--db-type`: Database type (postgresql, mysql, sqlite)
-- `--db-host`: Database host (default: localhost)
-- `--db-port`: Database port
-- `--db-name`: Database name
-- `--db-user`: Database username
-- `--db-password`: Database password
-- `--table-name`: Target table name (default: ingested_data)
-- `--load-strategy`: Data loading strategy (append, replace, upsert)
-- `--batch-size`: Batch size for database operations (default: 1000)
+### 1. Prepare Sample Data
 
-#### Database Examples
+Create some JSON files in a `data/` directory:
+
+**data/customers.json**
+```json
+[
+  {"id": 1, "name": "John Doe", "email": "john@example.com", "age": 30},
+  {"id": 2, "name": "Jane Smith", "email": "jane@example.com", "age": 25}
+]
+```
+
+**data/products.json**
+```json
+[
+  {"product_id": "P001", "name": "Laptop", "price": 999.99, "in_stock": true},
+  {"product_id": "P002", "name": "Mouse", "price": 29.99, "in_stock": false}
+]
+```
+
+### 2. Process with Web Interface
+
+1. Run `streamlit run app.py`
+2. Upload your JSON files
+3. Click "Process Files"
+4. View results and download processed data
+
+### 3. Process with CLI
+
 ```bash
-# Using database URL
-python main.py /data --database-url postgresql://user:pass@localhost:5432/mydb
-
-# Using configuration file
-python main.py /data --db-config-file config/database.yaml
-
-# Direct configuration with environment variables
-export DB_PASSWORD=mypassword
-python main.py /data --db-type postgresql --db-host localhost --db-name mydb --db-user postgres
+python main.py data/ --output sales_data.db --table all_data
 ```
 
-## 📝 Conclusion
+### 4. Examine Results
 
-The Generic Data Ingestor Framework represents a comprehensive solution for handling semi-structured data, particularly JSON. Through iterative development and addressing real-world challenges, it has evolved into a robust tool that can handle complex data structures, provide valuable insights through schema inference, and ensure data quality through validation.
+The processed data will be stored in SQLite with:
+- Inferred column types
+- Source file metadata
+- Processing timestamps
 
-The modular architecture ensures that the framework can continue to grow with new capabilities while maintaining a clean, maintainable codebase. Whether processing simple flat files or complex nested structures, the framework provides the tools needed for effective data ingestion and analysis.
+## 🎓 Academic Learning Outcomes
+
+This project demonstrates proficiency in:
+
+### Technical Skills
+- **Python Programming**: Object-oriented design, error handling, file I/O
+- **Data Processing**: JSON parsing, validation, transformation
+- **Database Integration**: Schema design, SQL operations, data loading
+- **Web Development**: Streamlit interface creation
+- **Software Architecture**: Modular design, design patterns
+
+### Analytical Skills
+- **Schema Inference**: Automatic detection of data types and structures
+- **Error Handling**: Graceful handling of malformed data
+- **Performance Considerations**: Efficient processing of multiple files
+
+### Project Management
+- **Documentation**: Clear code documentation and user guides
+- **Testing**: Basic validation and error scenarios
+- **Version Control**: Structured codebase organization
+
+## 📊 Sample Output
+
+After processing, you'll see results like:
+
+```
+🚀 Generic Data Ingestion Framework - FYP Version
+📁 Processing directory: data/
+🗄️  Output database: output.db
+📊 Table name: processed_data
+
+Found 2 JSON files to process
+Processing: customers.json
+  ✓ Processed 2 records
+Processing: products.json  
+  ✓ Processed 2 records
+Saving 4 records to database: output.db
+Creating table: processed_data
+
+✅ Processing completed successfully!
+📈 Summary:
+  • Files processed: 2/2
+  • Records saved: 4
+  • Processing time: 0.15s
+  • Database: output.db
+  • Table: processed_data
+```
+
+## 🔮 Future Enhancements
+
+The current simplified version provides a solid foundation for potential improvements:
+
+### Phase 1: Enhanced Features
+- Support for CSV and XML file formats
+- Advanced data validation rules
+- Improved error reporting and recovery
+- Configuration file support
+
+### Phase 2: Production Features  
+- Multiple database support (PostgreSQL, MySQL)
+- Connection pooling and optimization
+- Real-time processing capabilities
+- Advanced web interface with authentication
+
+### Phase 3: Enterprise Scale
+- Distributed processing support
+- Cloud deployment options
+- API development for external integration
+- Machine learning-based data quality assessment
+
+*See [FUTURE_ADVANCEMENTS.md](FUTURE_ADVANCEMENTS.md) for detailed roadmap.*
+
+## 🧪 Testing
+
+Basic testing can be performed with:
+
+```bash
+# Test with sample data
+python main.py test_data/
+
+# Verify database contents
+sqlite3 output.db "SELECT * FROM processed_data LIMIT 5;"
+```
+
+## 📚 Project Structure
+
+```
+generic_data_ingestor_framework/
+├── README.md                        # This file
+├── FUTURE_ADVANCEMENTS.md           # Detailed enhancement roadmap
+├── requirements.txt                 # Python dependencies
+├── app.py                           # Streamlit web interface  
+├── main.py                          # Command-line interface
+├── src/                            # Source code
+│   ├── core/application.py         # Main application (186 lines)
+│   ├── connectors/                 # Database layer (4 files)
+│   ├── processors/                 # Data processing (2 files)
+│   ├── scanners/                   # File discovery (1 file)
+│   └── handlers/                   # Utilities (3 files)
+└── test_data/                      # Sample data for testing
+```
+
+## ✅ Requirements Fulfilled
+
+This implementation satisfies the FYP requirements:
+
+- ✅ **FR1**: JSON file ingestion and processing
+- ✅ **FR2**: Data validation and format checking  
+- ✅ **FR3**: Recursive directory traversal
+- ✅ **FR4**: Filtering and error handling
+- ✅ **FR5**: Metadata extraction and logging
+- ✅ **FR6**: Configurable processing rules
+- ✅ **FR7**: Consistent output generation
+- ✅ **FR8**: Extensible architecture for new formats
+
+- ✅ **NFR1**: Modular design with clear separation
+- ✅ **NFR2**: Extensible system architecture  
+- ✅ **NFR3**: Efficient processing performance
+- ✅ **NFR4**: Comprehensive error logging
+- ✅ **NFR5**: Robust error handling
+- ✅ **NFR6**: Clear code documentation
+
+## 🎉 Conclusion
+
+This simplified Generic Data Ingestion Framework demonstrates core data processing concepts while maintaining clean, understandable code suitable for academic evaluation. The architecture provides a solid foundation for understanding enterprise data processing systems while remaining accessible for educational purposes.
+
+The project successfully balances academic requirements with real-world applicability, providing both immediate functionality and a clear path for future enhancement into production-ready systems.
+
+---
+
+*This is the simplified FYP version. For the full-featured production roadmap, see [FUTURE_ADVANCEMENTS.md](FUTURE_ADVANCEMENTS.md).*

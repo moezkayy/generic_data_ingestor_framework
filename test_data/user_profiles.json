@@ -1,0 +1,102 @@
+[
+  {
+    "user_id": "usr_001",
+    "username": "tech_enthusiast_2025",
+    "email": "john.doe@techcorp.com",
+    "profile": {
+      "first_name": "John",
+      "last_name": "Doe",
+      "age": 28,
+      "location": {
+        "city": "San Francisco",
+        "state": "California",
+        "country": "USA",
+        "coordinates": {
+          "latitude": 37.7749,
+          "longitude": -122.4194
+        }
+      },
+      "bio": "Software engineer passionate about AI and machine learning",
+      "avatar_url": "https://example.com/avatars/john_doe.jpg"
+    },
+    "preferences": {
+      "theme": "dark",
+      "language": "en-US",
+      "notifications": {
+        "email": true,
+        "push": false,
+        "sms": true
+      },
+      "privacy": {
+        "profile_visibility": "public",
+        "show_email": false,
+        "allow_messages": true
+      }
+    },
+    "account_details": {
+      "created_at": "2024-03-15T10:30:00Z",
+      "last_login": "2025-01-20T15:45:00Z",
+      "is_verified": true,
+      "subscription_tier": "premium",
+      "total_posts": 156,
+      "followers": 2847,
+      "following": 392
+    },
+    "interests": ["artificial_intelligence", "web_development", "cryptocurrency", "gaming"],
+    "skills": [
+      {"name": "Python", "level": "expert", "years_experience": 5},
+      {"name": "JavaScript", "level": "intermediate", "years_experience": 3},
+      {"name": "Machine Learning", "level": "advanced", "years_experience": 2}
+    ]
+  },
+  {
+    "user_id": "usr_002",
+    "username": "creative_designer",
+    "email": "sarah.wilson@designstudio.com",
+    "profile": {
+      "first_name": "Sarah",
+      "last_name": "Wilson",
+      "age": 31,
+      "location": {
+        "city": "Austin",
+        "state": "Texas", 
+        "country": "USA",
+        "coordinates": {
+          "latitude": 30.2672,
+          "longitude": -97.7431
+        }
+      },
+      "bio": "UI/UX designer creating beautiful and functional digital experiences",
+      "avatar_url": "https://example.com/avatars/sarah_wilson.jpg"
+    },
+    "preferences": {
+      "theme": "light",
+      "language": "en-US",
+      "notifications": {
+        "email": true,
+        "push": true,
+        "sms": false
+      },
+      "privacy": {
+        "profile_visibility": "friends_only",
+        "show_email": true,
+        "allow_messages": false
+      }
+    },
+    "account_details": {
+      "created_at": "2023-11-08T14:20:00Z",
+      "last_login": "2025-01-19T11:30:00Z",
+      "is_verified": true,
+      "subscription_tier": "basic",
+      "total_posts": 89,
+      "followers": 1205,
+      "following": 178
+    },
+    "interests": ["graphic_design", "photography", "art", "travel"],
+    "skills": [
+      {"name": "Adobe Photoshop", "level": "expert", "years_experience": 8},
+      {"name": "Figma", "level": "expert", "years_experience": 4},
+      {"name": "CSS", "level": "advanced", "years_experience": 6}
+    ]
+  }
+]

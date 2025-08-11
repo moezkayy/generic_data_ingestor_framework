@@ -1,0 +1,50 @@
+[
+  {
+    "id": 1,
+    "name": "Standard Record",
+    "value": 42,
+    "active": true
+  },
+  {
+    "id": 2,
+    "name": null,
+    "value": 0,
+    "active": false,
+    "extra_field": "This record has an extra field"
+  },
+  {
+    "id": 3,
+    "name": "",
+    "value": -999.99,
+    "active": null,
+    "unicode_text": "こんにちは世界",
+    "emoji_text": "Hello World! 🌍🚀💻"
+  },
+  {
+    "id": 4,
+    "name": "Record with special characters: !@#$%^&*()_+-={}[]|\\:;\"'<>?,./",
+    "value": 1.7976931348623157e+308,
+    "active": "yes",
+    "nested_empty": {},
+    "empty_array": [],
+    "long_text": "This is a very long text field that contains multiple sentences and should test how the system handles large text data. It includes various punctuation marks, numbers like 12345, and special characters like !@#$%^&*(). The purpose is to ensure that the data ingestion framework can handle diverse text content without issues."
+  },
+  {
+    "id": "string_id_instead_of_number",
+    "name": "Mixed Types Record",
+    "value": "not_a_number",
+    "active": 1,
+    "array_of_mixed": [1, "two", true, null, {"nested": "object"}],
+    "deeply_nested": {
+      "level_1": {
+        "level_2": {
+          "level_3": {
+            "level_4": {
+              "final_value": "Deep nesting test"
+            }
+          }
+        }
+      }
+    }
+  }
+]

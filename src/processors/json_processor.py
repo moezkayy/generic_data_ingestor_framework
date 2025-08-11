@@ -508,3 +508,43 @@ class JSONProcessor:
     def reset_statistics(self):
         """Reset processing statistics"""
         self.processing_stats = {key: 0 for key in self.processing_stats.keys()}
+    
+    def process_data(self, data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Simple data processing method for basic JSON data.
+        Added for compatibility with simplified application.
+        
+        Args:
+            data: List of dictionaries to process
+            
+        Returns:
+            List of processed dictionaries
+        """
+        if not data:
+            return []
+        
+        try:
+            # For the simplified version, we just return the data as-is
+            # with basic validation
+            processed_data = []
+            
+            for item in data:
+                if isinstance(item, dict):
+                    # Basic validation - ensure all values are serializable
+                    clean_item = {}
+                    for key, value in item.items():
+                        # Convert any non-serializable values to strings
+                        if isinstance(value, (dict, list)):
+                            clean_item[key] = json.dumps(value) if value else ""
+                        elif value is None:
+                            clean_item[key] = ""
+                        else:
+                            clean_item[key] = str(value) if not isinstance(value, (str, int, float, bool)) else value
+                    
+                    processed_data.append(clean_item)
+            
+            return processed_data
+            
+        except Exception as e:
+            self.logger.error(f"Error processing data: {str(e)}")
+            return []

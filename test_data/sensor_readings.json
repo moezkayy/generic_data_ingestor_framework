@@ -1,0 +1,92 @@
+[
+  {
+    "sensor_id": "TEMP_001",
+    "device_name": "Office Thermostat",
+    "location": "Building A - Floor 3 - Room 301",
+    "timestamp": "2025-01-20T08:00:00Z",
+    "reading": {
+      "temperature": 22.5,
+      "humidity": 45.2,
+      "unit": "celsius"
+    },
+    "metadata": {
+      "battery_level": 87,
+      "signal_strength": -65,
+      "firmware_version": "1.2.3",
+      "calibration_date": "2024-12-01"
+    },
+    "alerts": [],
+    "is_online": true
+  },
+  {
+    "sensor_id": "TEMP_001", 
+    "device_name": "Office Thermostat",
+    "location": "Building A - Floor 3 - Room 301",
+    "timestamp": "2025-01-20T08:15:00Z",
+    "reading": {
+      "temperature": 23.1,
+      "humidity": 44.8,
+      "unit": "celsius"
+    },
+    "metadata": {
+      "battery_level": 87,
+      "signal_strength": -63,
+      "firmware_version": "1.2.3",
+      "calibration_date": "2024-12-01"
+    },
+    "alerts": [],
+    "is_online": true
+  },
+  {
+    "sensor_id": "HUMID_002",
+    "device_name": "Greenhouse Monitor",
+    "location": "Greenhouse - Section B",
+    "timestamp": "2025-01-20T08:30:00Z",
+    "reading": {
+      "temperature": 28.7,
+      "humidity": 78.3,
+      "unit": "celsius"
+    },
+    "metadata": {
+      "battery_level": 34,
+      "signal_strength": -78,
+      "firmware_version": "2.1.0",
+      "calibration_date": "2024-11-15"
+    },
+    "alerts": [
+      {
+        "type": "low_battery",
+        "severity": "warning",
+        "message": "Battery level below 40%",
+        "timestamp": "2025-01-20T08:30:00Z"
+      }
+    ],
+    "is_online": true
+  },
+  {
+    "sensor_id": "PRESSURE_003",
+    "device_name": "Industrial Pressure Monitor",
+    "location": "Factory Floor - Station 7",
+    "timestamp": "2025-01-20T08:45:00Z",
+    "reading": {
+      "pressure": 145.6,
+      "temperature": 35.2,
+      "unit": "psi"
+    },
+    "metadata": {
+      "battery_level": null,
+      "signal_strength": -42,
+      "firmware_version": "3.0.1",
+      "calibration_date": "2025-01-01"
+    },
+    "alerts": [
+      {
+        "type": "high_pressure",
+        "severity": "critical",
+        "message": "Pressure exceeds safe threshold of 140 PSI",
+        "timestamp": "2025-01-20T08:45:00Z"
+      }
+    ],
+    "is_online": true
+  }
+]

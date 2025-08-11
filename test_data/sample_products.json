@@ -1,0 +1,26 @@
+[
+  {
+    "product_id": "P001",
+    "name": "Laptop",
+    "category": "Electronics",
+    "price": 999.99,
+    "in_stock": true,
+    "quantity": 50
+  },
+  {
+    "product_id": "P002", 
+    "name": "Wireless Mouse",
+    "category": "Electronics",
+    "price": 29.99,
+    "in_stock": true,
+    "quantity": 200
+  },
+  {
+    "product_id": "P003",
+    "name": "Office Chair",
+    "category": "Furniture", 
+    "price": 199.99,
+    "in_stock": false,
+    "quantity": 0
+  }
+]

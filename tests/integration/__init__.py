@@ -1,1 +1,1 @@
-"""Integration tests for the Generic Data Ingestor Framework."""
+# Empty __init__.py file to make integration tests a package

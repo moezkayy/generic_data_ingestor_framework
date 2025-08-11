@@ -1,8 +1,17 @@
-psycopg2-binary>=2.9.0
-mysql-connector-python>=8.0.0
+# Simplified requirements for FYP version
+# Essential dependencies only
+
+# Web interface
 streamlit>=1.28.0
+
+# Data processing
 pandas>=2.0.0
+
+# JSON processing (built-in to Python)
+# SQLite (built-in to Python)
+
+# Optional: For enhanced data visualization in Streamlit
 plotly>=5.15.0
+
+# Optional: For YAML configuration files (if needed)
 pyyaml>=6.0.0
-watchdog>=3.0.0
-numpy>=1.24.0

@@ -1,0 +1,65 @@
+[
+  {
+    "order_id": "ORD-2025-001",
+    "customer_id": 12345,
+    "order_date": "2025-01-15T14:30:00Z",
+    "status": "completed",
+    "total_amount": 299.99,
+    "currency": "USD",
+    "shipping_address": {
+      "street": "123 Main Street",
+      "city": "New York",
+      "state": "NY",
+      "zip_code": "10001",
+      "country": "USA"
+    },
+    "items": [
+      {
+        "product_id": "LAPTOP-001",
+        "name": "Gaming Laptop",
+        "quantity": 1,
+        "unit_price": 199.99,
+        "category": "Electronics"
+      },
+      {
+        "product_id": "MOUSE-002",
+        "name": "Wireless Mouse",
+        "quantity": 2,
+        "unit_price": 49.99,
+        "category": "Accessories"
+      }
+    ],
+    "payment_method": "credit_card",
+    "tracking_number": "TRK123456789",
+    "is_gift": false,
+    "notes": null
+  },
+  {
+    "order_id": "ORD-2025-002",
+    "customer_id": 67890,
+    "order_date": "2025-01-16T09:15:00Z",
+    "status": "processing",
+    "total_amount": 89.50,
+    "currency": "USD",
+    "shipping_address": {
+      "street": "456 Oak Avenue",
+      "city": "Los Angeles",
+      "state": "CA",
+      "zip_code": "90210",
+      "country": "USA"
+    },
+    "items": [
+      {
+        "product_id": "BOOK-001",
+        "name": "Python Programming Guide",
+        "quantity": 3,
+        "unit_price": 29.83,
+        "category": "Books"
+      }
+    ],
+    "payment_method": "paypal",
+    "tracking_number": null,
+    "is_gift": true,
+    "notes": "Gift wrapping requested"
+  }
+]

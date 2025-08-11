@@ -1,0 +1,16 @@
+{
+  "record_id": "SINGLE-001",
+  "type": "standalone_object",
+  "message": "This is a single JSON object, not an array",
+  "timestamp": "2025-01-20T12:00:00Z",
+  "data": {
+    "key1": "value1",
+    "key2": "value2",
+    "nested": {
+      "inner_key": "inner_value"
+    }
+  },
+  "numbers": [1, 2, 3, 4, 5],
+  "boolean_field": true,
+  "null_field": null
+}
