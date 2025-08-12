@@ -1,8 +1,5 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-Simple CLI for Generic Data Ingestion Framework (FYP Version).
-Simplified command-line interface for academic demonstration.
+CLI for Generic Data Ingestion Framework.
 """
 
 import sys
@@ -21,9 +18,9 @@ from core.application import DataIngestionApplication
 
 
 def main():
-    """Main entry point for the simplified CLI."""
+    """Main entry point for the CLI."""
     parser = argparse.ArgumentParser(
-        description="Generic Data Ingestion Framework - FYP Version",
+        description="Generic Data Ingestion Framework",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -72,7 +69,7 @@ Examples:
         app = DataIngestionApplication()
         
         if not args.quiet:
-            print("=== Generic Data Ingestion Framework - FYP Version ===")
+            print("=== Generic Data Ingestion Framework ===")
             print(f"Processing directory: {args.directory}")
             print(f"Output database: {args.output}")
             print(f"Table name: {args.table}")
