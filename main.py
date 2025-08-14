@@ -1,5 +1,9 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-CLI for Generic Data Ingestion Framework.
+Command Line Interface for Generic Data Ingestion Framework.
+Author: Moez Khan (SRN: 23097401)
+FYP Project - University of Hertfordshire
 """
 
 import sys
@@ -7,7 +11,7 @@ import argparse
 from pathlib import Path
 import os
 
-# Set UTF-8 encoding for Windows console
+# Set UTF-8 encoding for Windows console compatibility
 if sys.platform == 'win32':
     os.environ['PYTHONIOENCODING'] = 'utf-8'
 
@@ -18,7 +22,7 @@ from core.application import DataIngestionApplication
 
 
 def main():
-    """Main entry point for the CLI."""
+    """Main entry point for the CLI interface."""
     parser = argparse.ArgumentParser(
         description="Generic Data Ingestion Framework",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -69,7 +73,7 @@ Examples:
         app = DataIngestionApplication()
         
         if not args.quiet:
-            print("=== Generic Data Ingestion Framework ===")
+            print("=== Generic Data Ingestion Framework - FYP Version ===")
             print(f"Processing directory: {args.directory}")
             print(f"Output database: {args.output}")
             print(f"Table name: {args.table}")
