@@ -18,28 +18,46 @@ class TestDataIngestionApplication(unittest.TestCase):
     def setUp(self):
         # Create application instance
         self.app = DataIngestionApplication()
-        self.test_dir = tempfile.mkdtemp()
         self.test_db = tempfile.NamedTemporaryFile(delete=False, suffix='.db')
         self.test_db.close()
         
+        # Store the source directory for copying specific files as needed
+        self.src_dir = Path(__file__).parent / "unit_test_data"
+        
     def tearDown(self):
-        # Clean up test files
-        if Path(self.test_dir).exists():
+        # Force close any remaining database connections
+        import gc
+        import sqlite3
+        
+        gc.collect()
+        try:
+            temp_conn = sqlite3.connect(self.test_db.name)
+            temp_conn.close()
+        except:
+            pass
+            
+        # Clean up any temporary test directories
+        if hasattr(self, 'test_dir') and self.test_dir.exists():
             shutil.rmtree(self.test_dir)
-        # Don't delete database on Windows - it may be locked
-        # This is acceptable for tests as temp files will be cleaned up by OS
+            
+        try:
+            Path(self.test_db.name).unlink()
+        except (FileNotFoundError, PermissionError):
+            import time
+            time.sleep(0.1)
+            try:
+                Path(self.test_db.name).unlink()
+            except (FileNotFoundError, PermissionError):
+                pass
         
     def test_process_directory_successful_processing(self):
         """Test successful directory processing workflow"""
-        # Arrange - Create test JSON files
-        test_data = [
-            {"id": 1, "name": "John", "email": "john@example.com"},
-            {"id": 2, "name": "Jane", "email": "jane@example.com"}
-        ]
+        # Create a clean temp directory for this specific test
+        self.test_dir = Path(tempfile.mkdtemp())
         
-        test_file = Path(self.test_dir) / "test_data.json"
-        with open(test_file, 'w') as f:
-            json.dump(test_data, f)
+        # Copy specific test file to the test directory
+        src_file = self.src_dir / "simple_data.json"
+        shutil.copy(src_file, self.test_dir)
         
         # Act
         result = self.app.process_directory(self.test_dir, self.test_db.name)
@@ -52,10 +70,12 @@ class TestDataIngestionApplication(unittest.TestCase):
         
     def test_process_directory_with_processing_errors(self):
         """Test handling of file processing errors"""
-        # Arrange - Create malformed JSON file
-        malformed_file = Path(self.test_dir) / "malformed.json"
-        with open(malformed_file, 'w') as f:
-            f.write('{"id": 1, "name": "Missing closing brace"')
+        # Create a clean temp directory for this specific test
+        self.test_dir = Path(tempfile.mkdtemp())
+        
+        # Copy malformed test file to the test directory
+        src_file = self.src_dir / "malformed.json"
+        shutil.copy(src_file, self.test_dir)
         
         # Act
         result = self.app.process_directory(self.test_dir, self.test_db.name)
@@ -66,6 +86,9 @@ class TestDataIngestionApplication(unittest.TestCase):
         
     def test_process_directory_empty_directory(self):
         """Test processing of directory with no JSON files"""
+        # Create an empty temp directory for this specific test
+        self.test_dir = Path(tempfile.mkdtemp())
+        
         # Act
         result = self.app.process_directory(self.test_dir, self.test_db.name)
         
@@ -85,17 +108,14 @@ class TestDataIngestionApplication(unittest.TestCase):
         
     def test_schema_inference_multiple_file_types(self):
         """Test schema inference across multiple files with different structures"""
-        # Arrange - Create files with different structures
-        customers_data = [{"id": 1, "name": "John", "email": "john@example.com"}]
-        orders_data = [{"order_id": "ORD-001", "customer_id": 1, "total": 99.99}]
+        # Create a clean temp directory for this specific test
+        self.test_dir = Path(tempfile.mkdtemp())
         
-        customers_file = Path(self.test_dir) / "customers.json"
-        orders_file = Path(self.test_dir) / "orders.json"
-        
-        with open(customers_file, 'w') as f:
-            json.dump(customers_data, f)
-        with open(orders_file, 'w') as f:
-            json.dump(orders_data, f)
+        # Copy multiple test files to the test directory
+        src_files = ["customers_orders.json", "orders_data.json"]
+        for filename in src_files:
+            src_file = self.src_dir / filename
+            shutil.copy(src_file, self.test_dir)
         
         # Act
         result = self.app.process_directory(self.test_dir, self.test_db.name)
@@ -111,12 +131,12 @@ class TestDataIngestionApplication(unittest.TestCase):
         
     def test_get_database_preview(self):
         """Test database preview functionality"""
-        # Arrange - Create test data and process it
-        test_data = [{"id": 1, "name": "Test User"}]
-        test_file = Path(self.test_dir) / "test.json"
+        # Create a clean temp directory for this specific test
+        self.test_dir = Path(tempfile.mkdtemp())
         
-        with open(test_file, 'w') as f:
-            json.dump(test_data, f)
+        # Copy test file to the test directory  
+        src_file = self.src_dir / "simple_data.json"
+        shutil.copy(src_file, self.test_dir)
         
         # Process the data
         self.app.process_directory(self.test_dir, self.test_db.name)
@@ -125,8 +145,8 @@ class TestDataIngestionApplication(unittest.TestCase):
         preview = self.app.get_database_preview(self.test_db.name, "processed_data", limit=5)
         
         # Assert
-        self.assertEqual(len(preview), 1)
-        self.assertEqual(preview[0]['name'], 'Test User')
+        self.assertEqual(len(preview), 2)
+        self.assertEqual(preview[0]['name'], 'John')
 
 if __name__ == "__main__":
     unittest.main()

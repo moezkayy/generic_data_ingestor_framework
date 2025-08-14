@@ -1,0 +1,65 @@
+[
+  {
+    "user_id": "usr_000000",
+    "profile": {
+      "first_name": "User",
+      "last_name": "Number0",
+      "email": "user0@example.com"
+    },
+    "preferences": {
+      "theme": "dark",
+      "notifications": {
+        "email": true,
+        "push": true,
+        "sms": false
+      }
+    },
+    "metadata": {
+      "created_at": "2024-01-20T10:30:00Z",
+      "last_login": "2024-01-20T15:45:30Z",
+      "login_count": 1
+    }
+  },
+  {
+    "user_id": "usr_000001",
+    "profile": {
+      "first_name": "User",
+      "last_name": "Number1",
+      "email": "user1@example.com"
+    },
+    "preferences": {
+      "theme": "light",
+      "notifications": {
+        "email": true,
+        "push": false,
+        "sms": false
+      }
+    },
+    "metadata": {
+      "created_at": "2024-01-20T10:30:00Z",
+      "last_login": "2024-01-20T15:45:30Z",
+      "login_count": 4
+    }
+  },
+  {
+    "user_id": "usr_000002",
+    "profile": {
+      "first_name": "User",
+      "last_name": "Number2",
+      "email": "user2@example.com"
+    },
+    "preferences": {
+      "theme": "dark",
+      "notifications": {
+        "email": true,
+        "push": false,
+        "sms": false
+      }
+    },
+    "metadata": {
+      "created_at": "2024-01-20T10:30:00Z",
+      "last_login": "2024-01-20T15:45:30Z",
+      "login_count": 7
+    }
+  }
+]

@@ -1,0 +1,45 @@
+[
+  {
+    "order_id": "ORD-2024-001",
+    "customer_id": "CUST-001",
+    "order_date": "2024-01-20",
+    "status": "shipped",
+    "shipping_address": {
+      "street": "123 Main St",
+      "city": "New York",
+      "state": "NY",
+      "zip": "10001",
+      "coordinates": {
+        "latitude": 40.7128,
+        "longitude": -74.0060
+      }
+    },
+    "items": [
+      {
+        "product_id": "PROD-001",
+        "product_name": "Wireless Headphones",
+        "quantity": 1,
+        "unit_price": 99.99,
+        "total_price": 99.99
+      },
+      {
+        "product_id": "PROD-002",
+        "product_name": "Phone Case",
+        "quantity": 2,
+        "unit_price": 19.99,
+        "total_price": 39.98
+      }
+    ],
+    "payment": {
+      "method": "credit_card",
+      "card_last_four": "1234",
+      "transaction_id": "TXN-987654321"
+    },
+    "totals": {
+      "subtotal": 139.97,
+      "tax": 11.20,
+      "shipping": 9.99,
+      "total": 161.16
+    }
+  }
+]

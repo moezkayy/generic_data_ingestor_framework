@@ -1,0 +1,81 @@
+[
+  {
+    "transaction_id": "TXN-00000000",
+    "customer": {
+      "id": "CUST-0",
+      "profile": {
+        "name": "Customer 0",
+        "demographics": {
+          "age_group": "25-34",
+          "location": {
+            "country": "US",
+            "state": "NY",
+            "city": "New York",
+            "coordinates": {
+              "lat": 40.7128,
+              "lng": -74.0060
+            }
+          }
+        }
+      }
+    },
+    "transaction_details": {
+      "amount": 99.99,
+      "currency": "USD",
+      "payment_method": {
+        "type": "credit_card",
+        "provider": "visa",
+        "last_four": "1000"
+      },
+      "items": [
+        {
+          "product_id": "PROD-0000",
+          "quantity": 1,
+          "unit_price": 19.99
+        }
+      ]
+    }
+  },
+  {
+    "transaction_id": "TXN-00000001",
+    "customer": {
+      "id": "CUST-1",
+      "profile": {
+        "name": "Customer 1",
+        "demographics": {
+          "age_group": "25-34",
+          "location": {
+            "country": "US",
+            "state": "NY",
+            "city": "New York",
+            "coordinates": {
+              "lat": 40.7138,
+              "lng": -74.0050
+            }
+          }
+        }
+      }
+    },
+    "transaction_details": {
+      "amount": 100.09,
+      "currency": "USD",
+      "payment_method": {
+        "type": "credit_card",
+        "provider": "visa",
+        "last_four": "1001"
+      },
+      "items": [
+        {
+          "product_id": "PROD-0000",
+          "quantity": 1,
+          "unit_price": 19.99
+        },
+        {
+          "product_id": "PROD-0001",
+          "quantity": 2,
+          "unit_price": 24.99
+        }
+      ]
+    }
+  }
+]

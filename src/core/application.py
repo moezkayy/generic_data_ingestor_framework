@@ -158,6 +158,7 @@ This class implements the main application logic for the Generic Data Ingestion 
         Save processed data to SQLite database with automatic schema inference.
                 Referenced in: Implementation section (page 21) - Schema inference
         """
+        connector = None
         try:
             # Create SQLite connector using factory pattern
             connector = self.connector_factory.create_sqlite_connector(db_path)
@@ -188,6 +189,10 @@ This class implements the main application logic for the Generic Data Ingestion 
                 'error': error_msg,
                 'records_saved': 0
             }
+        finally:
+            # Ensure database connection is properly closed
+            if connector:
+                connector.disconnect()
 
     def _infer_simple_schema(self, data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
@@ -233,6 +238,7 @@ This class implements the main application logic for the Generic Data Ingestion 
         Returns:
             List of records from the database
         """
+        connector = None
         try:
             connector = self.connector_factory.create_sqlite_connector(db_path)
             query = f"SELECT * FROM {table_name} LIMIT {limit}"
@@ -241,3 +247,6 @@ This class implements the main application logic for the Generic Data Ingestion 
         except Exception as e:
             self.logger.error(f"Error getting database preview: {str(e)}")
             return []
+        finally:
+            if connector:
+                connector.disconnect()

@@ -1,0 +1,16 @@
+[
+  {
+    "user_id": "usr_001",
+    "profile": {
+      "name": "John Doe",
+      "address": {
+        "city": "New York",
+        "coordinates": {"lat": 40.7128, "lng": -74.0060}
+      }
+    },
+    "preferences": {
+      "theme": "dark",
+      "notifications": {"email": true, "push": false}
+    }
+  }
+]

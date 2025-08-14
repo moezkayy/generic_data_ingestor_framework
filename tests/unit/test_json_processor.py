@@ -15,14 +15,14 @@ class TestJSONProcessor(unittest.TestCase):
     
     def setUp(self):
         self.processor = JSONProcessor()
+        # Store the source directory for loading test data files
+        self.src_dir = Path(__file__).parent / "unit_test_data"
     
     def test_process_data_simple_objects(self):
         """Test processing of simple flat JSON objects"""
-        # Arrange
-        input_data = [
-            {"id": 1, "name": "John", "active": True},
-            {"id": 2, "name": "Jane", "active": False}
-        ]
+        # Arrange - Load test data from file
+        with open(self.src_dir / "simple_data.json", 'r') as f:
+            input_data = json.load(f)
         
         # Act
         result = self.processor.process_data(input_data)
@@ -31,25 +31,13 @@ class TestJSONProcessor(unittest.TestCase):
         self.assertEqual(len(result), 2)
         self.assertEqual(result[0]["id"], 1)
         self.assertEqual(result[0]["name"], "John")
-        self.assertEqual(result[0]["active"], True)
+        self.assertEqual(result[0]["email"], "john@example.com")
         
     def test_process_data_nested_objects(self):
         """Test preservation of nested objects as JSON strings"""
-        # Arrange
-        input_data = [{
-            "user_id": "usr_001",
-            "profile": {
-                "name": "John Doe",
-                "address": {
-                    "city": "New York",
-                    "coordinates": {"lat": 40.7128, "lng": -74.0060}
-                }
-            },
-            "preferences": {
-                "theme": "dark",
-                "notifications": {"email": True, "push": False}
-            }
-        }]
+        # Arrange - Load test data from file
+        with open(self.src_dir / "nested_data.json", 'r') as f:
+            input_data = json.load(f)
         
         # Act
         result = self.processor.process_data(input_data)
@@ -69,15 +57,9 @@ class TestJSONProcessor(unittest.TestCase):
         
     def test_process_data_arrays(self):
         """Test handling of array fields"""
-        # Arrange
-        input_data = [{
-            "order_id": "ORD-001",
-            "items": [
-                {"product": "Laptop", "quantity": 1, "price": 999.99},
-                {"product": "Mouse", "quantity": 2, "price": 29.99}
-            ],
-            "tags": ["electronics", "urgent", "corporate"]
-        }]
+        # Arrange - Load test data from file
+        with open(self.src_dir / "array_data.json", 'r') as f:
+            input_data = json.load(f)
         
         # Act
         result = self.processor.process_data(input_data)
@@ -93,14 +75,9 @@ class TestJSONProcessor(unittest.TestCase):
         
     def test_process_data_null_values(self):
         """Test handling of null/None values"""
-        # Arrange
-        input_data = [{
-            "id": 1,
-            "name": "John",
-            "middle_name": None,
-            "address": None,
-            "tags": []
-        }]
+        # Arrange - Load test data from file
+        with open(self.src_dir / "null_data.json", 'r') as f:
+            input_data = json.load(f)
         
         # Act
         result = self.processor.process_data(input_data)

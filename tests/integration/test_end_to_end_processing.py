@@ -17,117 +17,19 @@ class TestEndToEndProcessing(unittest.TestCase):
     """Integration tests using real files and database operations"""
     
     def setUp(self):
-        # Create temporary directories and files
-        self.test_dir = tempfile.mkdtemp()
+        # Create temporary database
         self.test_db = tempfile.NamedTemporaryFile(delete=False, suffix='.db')
         self.test_db.close()
         
-        # Create realistic test data files
-        self.create_test_data_files()
+        # Create temp dir and copy static test files into it
+        src_dir = Path(__file__).parent / "integration_test_data"
+        self.test_dir = Path(tempfile.mkdtemp())
+        for file in src_dir.iterdir():
+            shutil.copy(file, self.test_dir)
         
         # Initialize application
         self.app = DataIngestionApplication()
         
-    def create_test_data_files(self):
-        """Create realistic test JSON files"""
-        # Simple customer data
-        customers = [
-            {
-                "customer_id": "CUST-001",
-                "name": "John Doe",
-                "email": "john.doe@example.com",
-                "registration_date": "2024-01-15",
-                "status": "active"
-            },
-            {
-                "customer_id": "CUST-002", 
-                "name": "Jane Smith",
-                "email": "jane.smith@example.com",
-                "registration_date": "2024-01-18",
-                "status": "active"
-            }
-        ]
-        
-        # Complex order data with nesting
-        orders = [
-            {
-                "order_id": "ORD-2024-001",
-                "customer_id": "CUST-001",
-                "order_date": "2024-01-20",
-                "status": "shipped",
-                "shipping_address": {
-                    "street": "123 Main St",
-                    "city": "New York",
-                    "state": "NY",
-                    "zip": "10001",
-                    "coordinates": {
-                        "latitude": 40.7128,
-                        "longitude": -74.0060
-                    }
-                },
-                "items": [
-                    {
-                        "product_id": "PROD-001",
-                        "product_name": "Wireless Headphones",
-                        "quantity": 1,
-                        "unit_price": 99.99,
-                        "total_price": 99.99
-                    },
-                    {
-                        "product_id": "PROD-002",
-                        "product_name": "Phone Case",
-                        "quantity": 2,
-                        "unit_price": 19.99,
-                        "total_price": 39.98
-                    }
-                ],
-                "payment": {
-                    "method": "credit_card",
-                    "card_last_four": "1234",
-                    "transaction_id": "TXN-987654321"
-                },
-                "totals": {
-                    "subtotal": 139.97,
-                    "tax": 11.20,
-                    "shipping": 9.99,
-                    "total": 161.16
-                }
-            }
-        ]
-        
-        # Edge case data
-        edge_cases = [
-            {
-                "id": "edge_001",
-                "null_field": None,
-                "empty_string": "",
-                "zero_number": 0,
-                "false_boolean": False,
-                "empty_array": [],
-                "empty_object": {},
-                "unicode_text": "Hello 世界! 🌍",
-                "special_chars": "!@#$%^&*()_+-=[]{}|;':\",./<>?"
-            }
-        ]
-        
-        # Write test files
-        with open(Path(self.test_dir) / "customers.json", 'w', encoding='utf-8') as f:
-            json.dump(customers, f, ensure_ascii=False, indent=2)
-            
-        with open(Path(self.test_dir) / "orders.json", 'w', encoding='utf-8') as f:
-            json.dump(orders, f, ensure_ascii=False, indent=2)
-            
-        with open(Path(self.test_dir) / "edge_cases.json", 'w', encoding='utf-8') as f:
-            json.dump(edge_cases, f, ensure_ascii=False, indent=2)
-            
-        # Create malformed JSON file for error testing
-        with open(Path(self.test_dir) / "malformed.json", 'w') as f:
-            f.write('{"id": 1, "name": "Missing closing brace"')
-            
-        # Create empty JSON file
-        with open(Path(self.test_dir) / "empty.json", 'w') as f:
-            f.write('[]')
-    
     def test_complete_processing_workflow(self):
         """Test the complete end-to-end processing workflow"""
         # Act
@@ -219,12 +121,30 @@ class TestEndToEndProcessing(unittest.TestCase):
         
     def tearDown(self):
         """Clean up test files and directories"""
+        # Force close any remaining database connections
+        import gc
+        import sqlite3
+        
+        gc.collect()
+        try:
+            temp_conn = sqlite3.connect(self.test_db.name)
+            temp_conn.close()
+        except:
+            pass
+            
         # Clean up temporary directory
         if Path(self.test_dir).exists():
             shutil.rmtree(self.test_dir)
         
-        # Don't delete database on Windows - it may be locked
-        # This is acceptable for tests as temp files will be cleaned up by OS
+        try:
+            Path(self.test_db.name).unlink()
+        except (FileNotFoundError, PermissionError):
+            import time
+            time.sleep(0.1)
+            try:
+                Path(self.test_db.name).unlink()
+            except (FileNotFoundError, PermissionError):
+                pass
 
 if __name__ == "__main__":
     unittest.main()

@@ -63,6 +63,20 @@ class DatabaseConnectorFactory:
         # Validate database type against supported types
         if db_type_normalized not in self.SUPPORTED_DATABASES:
             supported = ', '.join(self.SUPPORTED_DATABASES.keys())
+            error_msg = f"Database type '{db_type}' not supported. Supported types: {supported}"
+            raise ConnectorFactoryError(error_msg)
+        
+        try:
+            # Get connector class and create instance
+            connector_class = self.SUPPORTED_DATABASES[db_type_normalized]
+            connector = connector_class(connection_params)
+            
+            self.logger.info(f"Created {db_type_normalized} connector successfully")
+            return connector
+            
+        except Exception as e:
+            error_msg = f"Failed to create {db_type_normalized} connector: {str(e)}"
+            self.logger.error(error_msg)
             raise ConnectorFactoryError(error_msg)
     
     def list_supported_databases(self) -> List[str]:

@@ -1,0 +1,13 @@
+[
+  {
+    "id": "edge_001",
+    "null_field": null,
+    "empty_string": "",
+    "zero_number": 0,
+    "false_boolean": false,
+    "empty_array": [],
+    "empty_object": {},
+    "unicode_text": "Hello 世界! 🌍",
+    "special_chars": "!@#$%^&*()_+-=[]{}|;':\",./<>?"
+  }
+]

@@ -1,0 +1,15 @@
+[
+  {
+    "id": "unicode_001",
+    "chinese": "你好世界",
+    "arabic": "مرحبا بالعالم", 
+    "emoji": "Hello World! 🌍🚀💻🎉",
+    "japanese": "こんにちは世界",
+    "russian": "Привет, мир!",
+    "special_chars": "!@#$%^&*()_+-=[]{}|;':\",./<>?",
+    "xml_entities": "<>&\"'",
+    "unicode_escape": "\u0048\u0065\u006c\u006c\u006f",
+    "zero_width": "\u200b\u200c\u200d",
+    "control_chars": "\n\t\r\b\f"
+  }
+]

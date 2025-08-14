@@ -1,0 +1,17 @@
+[
+  {"id": 1, "name": "Customer 1", "value": "value_1"},
+  {"id": 2, "name": "Customer 2", "value": "value_2"},
+  {"id": 3, "name": "Customer 3", "value": "value_3"},
+  {"id": 4, "name": "Customer 4", "value": "value_4"},
+  {"id": 5, "name": "Customer 5", "value": "value_5"},
+  {"id": 6, "name": "Customer 6", "value": "value_6"},
+  {"id": 7, "name": "Customer 7", "value": "value_7"},
+  {"id": 8, "name": "Customer 8", "value": "value_8"},
+  {"id": 9, "name": "Customer 9", "value": "value_9"},
+  {"id": 10, "name": "Customer 10", "value": "value_10"},
+  {"id": 11, "name": "Customer 11", "value": "value_11"},
+  {"id": 12, "name": "Customer 12", "value": "value_12"},
+  {"id": 13, "name": "Customer 13", "value": "value_13"},
+  {"id": 14, "name": "Customer 14", "value": "value_14"},
+  {"id": 15, "name": "Customer 15", "value": "value_15"}
+]

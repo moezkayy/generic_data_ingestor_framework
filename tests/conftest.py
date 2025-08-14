@@ -20,12 +20,92 @@ from src.handlers.logging_handler import LoggingHandler
 @pytest.fixture(scope="session")
 def test_logger() -> logging.Logger:
     """Create a test logger with appropriate configuration."""
-    log_handler = LoggingHandler()
-    return log_handler.setup_logging(
-        level='DEBUG',
-        console_output=False,
-        file_output=False
-    )
+    log_handler = LoggingHandler("DEBUG")
+    return log_handler.setup_logging()
+
+
+@pytest.fixture(scope="session")
+def test_data_dir() -> Path:
+    """Get path to test data directory."""
+    return Path(__file__).parent.parent / "test_data"
+
+
+@pytest.fixture
+def sample_customers_file(test_data_dir: Path) -> Path:
+    """Path to sample customers JSON file."""
+    return test_data_dir / "sample_customers.json"
+
+
+@pytest.fixture  
+def sample_products_file(test_data_dir: Path) -> Path:
+    """Path to sample products JSON file."""
+    return test_data_dir / "sample_products.json"
+
+
+@pytest.fixture
+def ecommerce_orders_file(test_data_dir: Path) -> Path:
+    """Path to ecommerce orders JSON file."""
+    return test_data_dir / "ecommerce_orders.json"
+
+
+@pytest.fixture
+def financial_transactions_file(test_data_dir: Path) -> Path:
+    """Path to financial transactions JSON file."""
+    return test_data_dir / "financial_transactions.json"
+
+
+@pytest.fixture
+def large_dataset_file(test_data_dir: Path) -> Path:
+    """Path to large dataset for performance testing."""
+    return test_data_dir / "performance" / "large_dataset.json"
+
+
+@pytest.fixture
+def medium_dataset_file(test_data_dir: Path) -> Path:
+    """Path to medium dataset for performance testing."""
+    return test_data_dir / "performance" / "medium_dataset.json"
+
+
+@pytest.fixture
+def small_dataset_file(test_data_dir: Path) -> Path:
+    """Path to small dataset for performance testing."""
+    return test_data_dir / "performance" / "small_dataset.json"
+
+
+@pytest.fixture
+def regression_dataset_file(test_data_dir: Path) -> Path:
+    """Path to regression dataset for performance testing."""
+    return test_data_dir / "performance" / "regression_dataset.json"
+
+
+@pytest.fixture
+def edge_cases_file(test_data_dir: Path) -> Path:
+    """Path to edge cases test data."""
+    return test_data_dir / "edge_cases.json"
+
+
+@pytest.fixture
+def malformed_json_file(test_data_dir: Path) -> Path:
+    """Path to malformed JSON test file."""
+    return test_data_dir / "malformed.json"
+
+
+@pytest.fixture
+def empty_data_file(test_data_dir: Path) -> Path:
+    """Path to empty data test file."""
+    return test_data_dir / "empty_data.json"
+
+
+@pytest.fixture
+def error_handling_dir(test_data_dir: Path) -> Path:
+    """Path to error handling test data directory."""
+    return test_data_dir / "error_handling"
+
+
+@pytest.fixture
+def integration_test_dir(test_data_dir: Path) -> Path:
+    """Path to integration test data directory."""
+    return test_data_dir / "integration"
 
 
 @pytest.fixture
@@ -86,61 +166,11 @@ def sample_sqlite_params(temp_db_file: str) -> Dict[str, Any]:
 
 @pytest.fixture
 def sample_table_schema() -> list:
-    """Sample table schema for testing."""
+    """Basic table schema for testing."""
     return [
-        {
-            'name': 'id',
-            'type': 'integer',
-            'primary_key': True,
-            'auto_increment': True,
-            'nullable': False
-        },
-        {
-            'name': 'name',
-            'type': 'varchar',
-            'nullable': False,
-            'default': None
-        },
-        {
-            'name': 'email',
-            'type': 'varchar',
-            'nullable': True,
-            'unique': True
-        },
-        {
-            'name': 'created_at',
-            'type': 'timestamp',
-            'nullable': False,
-            'default': 'CURRENT_TIMESTAMP'
-        },
-        {
-            'name': 'is_active',
-            'type': 'boolean',
-            'nullable': False,
-            'default': True
-        }
-    ]
-
-
-@pytest.fixture
-def sample_data() -> list:
-    """Sample data for testing database operations."""
-    return [
-        {
-            'name': 'John Doe',
-            'email': 'john@example.com',
-            'is_active': True
-        },
-        {
-            'name': 'Jane Smith',
-            'email': 'jane@example.com',
-            'is_active': False
-        },
-        {
-            'name': 'Bob Johnson',
-            'email': 'bob@example.com',
-            'is_active': True
-        }
+        {'name': 'id', 'type': 'INTEGER', 'nullable': False},
+        {'name': 'name', 'type': 'TEXT', 'nullable': True},
+        {'name': 'email', 'type': 'TEXT', 'nullable': True}
     ]
 
 

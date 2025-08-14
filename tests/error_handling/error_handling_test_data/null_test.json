@@ -1,0 +1,16 @@
+[
+  {
+    "id": "null_001",
+    "explicit_null": null,
+    "empty_string": "",
+    "empty_array": [],
+    "empty_object": {},
+    "zero": 0,
+    "false": false,
+    "nested_with_nulls": {
+      "inner_null": null,
+      "inner_empty": "",
+      "inner_array_with_nulls": [null, "", 0, false]
+    }
+  }
+]

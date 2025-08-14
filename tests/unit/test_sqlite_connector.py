@@ -97,11 +97,15 @@ class TestSQLiteConnector(unittest.TestCase):
         ]
         self.connector.create_table('test_table', schema)
         
-        test_data = [
-            {'id': 1, 'name': 'Alice'},
-            {'id': 2, 'name': 'Bob'},
-            {'id': 3, 'name': 'Charlie'}
-        ]
+        # Load real test data from unit test data directory
+        test_data_dir = Path(__file__).parent / "unit_test_data"
+        customers_file = test_data_dir / "sample_customers.json"
+        
+        import json
+        with open(customers_file, 'r') as f:
+            customer_data = json.load(f)
+        # Take first 3 customers for this test
+        test_data = customer_data[:3]
         
         # Act
         inserted_count = self.connector.insert_data('test_table', test_data)
@@ -118,11 +122,28 @@ class TestSQLiteConnector(unittest.TestCase):
         """Test insertion of large dataset with batching"""
         # Arrange
         self.connector.connect()
-        schema = [{'name': 'id', 'type': 'INTEGER'}, {'name': 'value', 'type': 'TEXT'}]
+        schema = [
+            {'name': 'id', 'type': 'INTEGER'}, 
+            {'name': 'name', 'type': 'TEXT'},
+            {'name': 'value', 'type': 'TEXT'}
+        ]
         self.connector.create_table('large_table', schema)
         
-        # Generate 150 records (test batching with batch_size=100)
-        large_dataset = [{'id': i, 'value': f'value_{i}'} for i in range(150)]
+        # Use actual large dataset from unit test data directory
+        test_data_dir = Path(__file__).parent / "unit_test_data"
+        large_file = test_data_dir / "large_customers.json"
+        
+        import json
+        with open(large_file, 'r') as f:
+            base_dataset = json.load(f)
+        
+        # Generate larger dataset for batching test (150 records)
+        large_dataset = []
+        for i in range(150):
+            base_record = base_dataset[i % len(base_dataset)].copy()
+            base_record['id'] = i + 1
+            base_record['value'] = f'value_{i}'
+            large_dataset.append(base_record)
         
         # Act
         inserted_count = self.connector.insert_data('large_table', large_dataset, batch_size=100)
@@ -142,6 +163,7 @@ class TestSQLiteConnector(unittest.TestCase):
         schema = [{'name': 'id', 'type': 'INTEGER'}, {'name': 'name', 'type': 'TEXT'}]
         self.connector.create_table('query_table', schema)
         
+        # Use sample data for query test
         test_data = [{'id': 1, 'name': 'Test User'}]
         self.connector.insert_data('query_table', test_data)
         
