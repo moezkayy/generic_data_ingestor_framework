@@ -1,6 +1,10 @@
 """
-Simple Database Connector Factory for FYP.
-Supports SQLite only with basic functionality.
+Database Connector Factory Implementation.
+Author: Moez Khan (SRN: 23097401)
+FYP Project - University of Hertfordshire
+
+Implements Factory pattern for database connector creation.
+Supports extensibility while maintaining simplicity for FYP scope.
 """
 
 import logging
@@ -16,26 +20,34 @@ class ConnectorFactoryError(Exception):
 
 class DatabaseConnectorFactory:
     """
-    Simple factory class for creating SQLite database connectors.
-    Designed for educational purposes and FYP demonstration.
+    Factory class for creating database connectors.
+    
+    Design Pattern: Factory Method for extensible object creation
+    Current Scope: SQLite only (deliberate FYP limitation)
+    Future Extension: Easy addition of new database types
+    Referenced in: Implementation section (page 19) - Extensibility design
     """
     
-    # Only SQLite is supported in the simplified version
+    # Supported database types - SQLite only for FYP scope
+    # Architecture supports easy extension: just add new connector classes
     SUPPORTED_DATABASES = {
         'sqlite': SQLiteConnector
+        # Future extensions:
+        # 'postgresql': PostgreSQLConnector,
+        # 'mysql': MySQLConnector
     }
     
     def __init__(self):
         """Initialize the database connector factory."""
         self.logger = logging.getLogger('data_ingestion.connector_factory')
-        self.logger.info("Simple database connector factory initialized (SQLite only)")
+        self.logger.info("Database connector factory initialized (SQLite only)")
     
     def create_connector(self, db_type: str, connection_params: Dict[str, Any]) -> DatabaseConnector:
         """
         Create a database connector instance.
         
         Args:
-            db_type: Type of database (only 'sqlite' supported)
+            db_type: Type of database ('sqlite' for FYP scope)
             connection_params: Database connection parameters
             
         Returns:
@@ -43,27 +55,14 @@ class DatabaseConnectorFactory:
             
         Raises:
             ConnectorFactoryError: If connector creation fails
-            ValueError: If invalid parameters provided
+            ValueError: If database type not supported
         """
-        # Normalize database type
+        # Normalize database type for consistent handling
         db_type_normalized = db_type.lower().strip()
         
-        # Validate database type
+        # Validate database type against supported types
         if db_type_normalized not in self.SUPPORTED_DATABASES:
             supported = ', '.join(self.SUPPORTED_DATABASES.keys())
-            raise ConnectorFactoryError(f"Unsupported database type: {db_type_normalized}. Supported types: {supported}")
-        
-        try:
-            # Create the connector
-            connector_class = self.SUPPORTED_DATABASES[db_type_normalized]
-            connector = connector_class(connection_params)
-            
-            self.logger.info(f"Successfully created {db_type_normalized} connector")
-            return connector
-            
-        except Exception as e:
-            error_msg = f"Failed to create {db_type} connector: {str(e)}"
-            self.logger.error(error_msg)
             raise ConnectorFactoryError(error_msg)
     
     def list_supported_databases(self) -> List[str]:
@@ -71,7 +70,7 @@ class DatabaseConnectorFactory:
         Get list of supported database types.
         
         Returns:
-            List[str]: Supported database types
+            List[str]: Currently supported database types
         """
         return list(self.SUPPORTED_DATABASES.keys())
     
@@ -83,13 +82,13 @@ class DatabaseConnectorFactory:
             database_path: Path to SQLite database file
             
         Returns:
-            SQLiteConnector: SQLite connector instance
+            SQLiteConnector: Configured SQLite connector instance
         """
         connection_params = {'database': database_path}
         return self.create_connector('sqlite', connection_params)
 
 
-# Global factory instance
+# Global factory instance for application use
 _factory = None
 
 def get_connector_factory() -> DatabaseConnectorFactory:
