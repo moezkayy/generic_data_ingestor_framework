@@ -1,6 +1,0 @@
-{
-  "id": 1,
-  "name": "This JSON is intentionally malformed"
-  "missing_comma": true,
-  "another_field": "This should cause parsing errors"
-}
